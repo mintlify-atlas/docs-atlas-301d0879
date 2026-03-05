@@ -1,0 +1,264 @@
+---
+title: Protecting Pages
+description: Learn how to protect your Next.js pages using Auth0 authentication for both App Router and Pages Router.
+---
+
+Protect your Next.js pages to ensure only authenticated users can access them. The SDK provides the `withPageAuthRequired` helper for both server-side and client-side page protection.
+
+## Server-Side Protection
+
+Protect pages on the server to redirect unauthenticated users to login before they can access the page content.
+
+### App Router
+
+Wrap your Server Component with `withPageAuthRequired` and provide a `returnTo` path since Server Components aren't aware of the page's URL.
+
+<Steps>
+  <Step title="Import the auth client">
+    Import your Auth0 client instance:
+
+    ```typescript
+    import { auth0 } from "@/lib/auth0";
+    ```
+  </Step>
+
+  <Step title="Wrap your component">
+    Wrap your page component with `withPageAuthRequired` and specify the `returnTo` option:
+
+    ```tsx app/profile/page.tsx
+    import { auth0 } from "@/lib/auth0";
+
+    const ProfilePage = auth0.withPageAuthRequired(
+      async function Profile() {
+        const { user } = await auth0.getSession();
+        return <div>Hello {user.name}</div>;
+      },
+      { returnTo: "/profile" }
+    );
+
+    export default ProfilePage;
+    ```
+  </Step>
+</Steps>
+
+<Note>
+  The `returnTo` option is required for App Router pages because Server Components don't have access to the request URL. This ensures users are redirected back to the correct page after logging in.
+</Note>
+
+#### Dynamic Routes
+
+For pages with dynamic route parameters, you can use a function for `returnTo` to preserve the route:
+
+```tsx app/posts/[slug]/page.tsx
+import { AppRouterPageRouteOpts } from "@auth0/nextjs-auth0/server";
+import { auth0 } from "@/lib/auth0";
+
+const PostPage = auth0.withPageAuthRequired(
+  async function Post({ params, searchParams }: AppRouterPageRouteOpts) {
+    const slug = (await params)?.slug as string;
+    const { user } = await auth0.getSession();
+
+    return (
+      <div>
+        <h1>Post: {slug}</h1>
+        <p>Viewing as: {user.name}</p>
+      </div>
+    );
+  },
+  {
+    async returnTo({ params }) {
+      const slug = (await params)?.slug as string;
+      return `/posts/${slug}`;
+    }
+  }
+);
+
+export default PostPage;
+```
+
+### Pages Router
+
+Use `withPageAuthRequired` to wrap your `getServerSideProps` function.
+
+<Steps>
+  <Step title="Import the auth client">
+    Import your Auth0 client instance:
+
+    ```typescript
+    import { auth0 } from "@/lib/auth0";
+    ```
+  </Step>
+
+  <Step title="Create your page component">
+    Define your page component that receives the user prop:
+
+    ```tsx pages/profile.tsx
+    export default function Profile({ user }) {
+      return <div>Hello {user.name}</div>;
+    }
+    ```
+  </Step>
+
+  <Step title="Wrap getServerSideProps">
+    Export `getServerSideProps` wrapped with `withPageAuthRequired`:
+
+    ```tsx pages/profile.tsx
+    import { auth0 } from "@/lib/auth0";
+
+    export default function Profile({ user }) {
+      return <div>Hello {user.name}</div>;
+    }
+
+    export const getServerSideProps = auth0.withPageAuthRequired();
+    ```
+  </Step>
+</Steps>
+
+The SDK automatically adds the `user` object to your page props.
+
+#### Custom getServerSideProps
+
+You can pass your own `getServerSideProps` function, and the SDK will merge your props with the user:
+
+```tsx pages/dashboard.tsx
+import type { GetServerSideProps, InferGetServerSidePropsType } from "next";
+import { auth0 } from "@/lib/auth0";
+
+export default function Dashboard({
+  user,
+  customData
+}: InferGetServerSidePropsType<typeof getServerSideProps>) {
+  return (
+    <div>
+      <h1>Welcome, {user.name}!</h1>
+      <p>{customData}</p>
+    </div>
+  );
+}
+
+export const getServerSideProps = auth0.withPageAuthRequired({
+  async getServerSideProps(ctx) {
+    // Access the session if needed
+    const session = await auth0.getSession(ctx.req);
+
+    return {
+      props: {
+        customData: "Additional data"
+      }
+    };
+  }
+});
+```
+
+#### Custom Return URL
+
+Specify a custom `returnTo` URL for the login redirect:
+
+```tsx pages/protected.tsx
+import { auth0 } from "@/lib/auth0";
+
+export default function Protected({ user }) {
+  return <div>Protected content for {user.name}</div>;
+}
+
+export const getServerSideProps = auth0.withPageAuthRequired({
+  returnTo: "/protected"
+});
+```
+
+## Client-Side Protection
+
+Protect client-rendered pages to redirect users on the client side. This is useful for pages that don't need SEO or where you want client-side rendering.
+
+<Steps>
+  <Step title="Add 'use client' directive">
+    Mark your component as a client component:
+
+    ```tsx
+    "use client";
+    ```
+  </Step>
+
+  <Step title="Import and wrap your component">
+    Import `withPageAuthRequired` from the client package and wrap your component:
+
+    ```tsx app/profile/page.tsx
+    "use client";
+
+    import { withPageAuthRequired } from "@auth0/nextjs-auth0/client";
+
+    export default withPageAuthRequired(function Profile({ user }) {
+      return <div>Hello, {user.name}!</div>;
+    });
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  Client-side protection only works after the page loads in the browser. The page content may briefly flash before redirecting unauthenticated users. For SEO-sensitive pages, use server-side protection instead.
+</Warning>
+
+### With Loading State
+
+The `withPageAuthRequired` HOC passes a `user` prop and handles loading states automatically:
+
+```tsx
+"use client";
+
+import { withPageAuthRequired } from "@auth0/nextjs-auth0/client";
+
+function Profile({ user }) {
+  return (
+    <div>
+      <h1>Profile</h1>
+      <pre>{JSON.stringify(user, null, 2)}</pre>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(Profile, {
+  onRedirecting: () => <div>Redirecting to login...</div>,
+  onError: (error) => <div>Error: {error.message}</div>
+});
+```
+
+## Comparison: Server vs Client
+
+| Feature | Server-Side | Client-Side |
+|---------|-------------|-------------|
+| **SEO** | ✅ Crawlable | ❌ Not crawlable |
+| **Initial Load** | Protected from start | Brief flash possible |
+| **Use Case** | Public-facing pages | Admin dashboards |
+| **Router** | App Router, Pages Router | App Router only |
+| **Performance** | Faster initial load | Slower (JS required) |
+
+## Best Practices
+
+<Note>
+  - **Use server-side protection** for pages that need SEO or contain sensitive data
+  - **Use client-side protection** for internal dashboards or admin panels
+  - **Always specify `returnTo`** in App Router to ensure users return to the correct page after login
+  - **Keep `returnTo` URLs registered** in your Auth0 Dashboard under Allowed Callback URLs
+</Note>
+
+## Troubleshooting
+
+### Users not redirected after login
+
+Ensure the `returnTo` URL is registered in your Auth0 Application settings:
+
+1. Go to the [Auth0 Dashboard](https://manage.auth0.com)
+2. Navigate to **Applications** > Your Application
+3. Add your URL to **Allowed Callback URLs**
+
+### Server Component errors
+
+If you see "Server Component" errors with App Router:
+- Ensure you're providing the `returnTo` option
+- Don't use `redirect()` manually; let `withPageAuthRequired` handle it
+
+### Pages Router props not merged
+
+If custom props aren't showing up:
+- Make sure your `getServerSideProps` returns a `props` object
+- Don't return `redirect` or `notFound` from your custom function; return props only

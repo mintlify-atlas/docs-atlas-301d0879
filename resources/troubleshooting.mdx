@@ -1,0 +1,662 @@
+---
+title: Troubleshooting
+description: Solutions for common issues with the Auth0 Next.js SDK
+---
+
+This guide provides solutions for common issues you may encounter when using the Auth0 Next.js SDK.
+
+## Authentication Issues
+
+### Infinite redirect loop
+
+**Symptoms:** Browser keeps redirecting between `/auth/login` and `/auth/callback`.
+
+**Causes & Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Missing callback URL in Auth0 Dashboard">
+    Ensure your callback URL is registered in the Auth0 Dashboard:
+    
+    1. Go to [Applications](https://manage.auth0.com/#/applications)
+    2. Select your application
+    3. Add your callback URL to **Allowed Callback URLs**:
+       - Local: `http://localhost:3000/auth/callback`
+       - Production: `https://yourdomain.com/auth/callback`
+    4. Add your logout URL to **Allowed Logout URLs**:
+       - Local: `http://localhost:3000`
+       - Production: `https://yourdomain.com`
+  </Accordion>
+  
+  <Accordion title="Middleware matcher too restrictive">
+    If your middleware matcher excludes `/auth/*` routes, authentication won't work.
+    
+    ```typescript
+    // Wrong - excludes auth routes
+    export const config = {
+      matcher: ["/dashboard/:path*"]
+    };
+    
+    // Correct - includes all routes except static files
+    export const config = {
+      matcher: [
+        "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)"
+      ]
+    };
+    ```
+  </Accordion>
+  
+  <Accordion title="Base path misconfiguration">
+    If using Next.js `basePath`, ensure `NEXT_PUBLIC_BASE_PATH` is set:
+    
+    ```env
+    NEXT_PUBLIC_BASE_PATH=/dashboard
+    ```
+    
+    Auth routes will be at `/dashboard/auth/login`, `/dashboard/auth/callback`, etc.
+  </Accordion>
+</AccordionGroup>
+
+### "Invalid state" error
+
+**Error code:** `invalid_state`
+
+**Causes & Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Cookie not persisting between requests">
+    The transaction cookie must persist during the OAuth flow.
+    
+    **Check:**
+    - Browser allows cookies
+    - No aggressive cookie blockers
+    - `sameSite` cookie setting is compatible with your domain setup
+    
+    **Fix for cross-domain issues:**
+    ```typescript
+    const auth0 = new Auth0Client({
+      session: {
+        cookie: {
+          sameSite: "none", // For cross-domain
+          secure: true      // Required with sameSite=none
+        }
+      }
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Clock skew between client and server">
+    Large time differences can cause state validation to fail.
+    
+    **Fix:** Synchronize system clocks or increase transaction cookie duration:
+    ```typescript
+    const auth0 = new Auth0Client({
+      transactionCookie: {
+        duration: 900 // 15 minutes instead of default 10
+      }
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Concurrent authentication attempts">
+    Multiple tabs or windows attempting login simultaneously.
+    
+    **Fix:** Ensure `enableParallelTransactions` is enabled (default):
+    ```typescript
+    const auth0 = new Auth0Client({
+      enableParallelTransactions: true // Default, supports concurrent flows
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Session not persisting after login
+
+**Symptoms:** User successfully logs in but `getSession()` returns `null`.
+
+**Causes & Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Cookie too large (>4KB)">
+    Session cookies have a 4KB size limit. Large ID tokens or custom claims can exceed this.
+    
+    **Check:** Inspect cookies in browser DevTools
+    
+    **Fix 1 - Use stateful sessions:**
+    ```typescript
+    import { Auth0Client, AbstractSessionStore } from "@auth0/nextjs-auth0/server";
+    import { Redis } from "ioredis";
+    
+    class RedisSessionStore extends AbstractSessionStore {
+      // Implement get/set/delete
+    }
+    
+    const auth0 = new Auth0Client({
+      sessionStore: new RedisSessionStore()
+    });
+    ```
+    
+    **Fix 2 - Reduce token size:**
+    - Remove unnecessary custom claims
+    - Use namespace in claim names
+    - Request fewer scopes
+  </Accordion>
+  
+  <Accordion title="beforeSessionSaved hook error">
+    If your `beforeSessionSaved` hook throws an error, the session won't be saved.
+    
+    **Fix:** Add error handling:
+    ```typescript
+    const auth0 = new Auth0Client({
+      beforeSessionSaved: async (session) => {
+        try {
+          // Your custom logic
+          return session;
+        } catch (error) {
+          console.error("beforeSessionSaved error:", error);
+          return session; // Still save the session
+        }
+      }
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Secure cookie on HTTP">
+    Secure cookies won't be sent over HTTP connections.
+    
+    **Check:** Are you accessing via `http://` with `secure: true`?
+    
+    **Fix for local development:**
+    ```typescript
+    const auth0 = new Auth0Client({
+      session: {
+        cookie: {
+          secure: process.env.NODE_ENV === "production"
+        }
+      }
+    });
+    ```
+    
+    **Note:** Never use `secure: false` in production with dynamic base URLs.
+  </Accordion>
+</AccordionGroup>
+
+## Token Issues
+
+### "Missing refresh token" error
+
+**Error code:** `missing_refresh_token`
+
+**Causes & Solutions:**
+
+<AccordionGroup>
+  <Accordion title="offline_access scope not requested">
+    Refresh tokens require the `offline_access` scope.
+    
+    **Fix:**
+    ```typescript
+    const auth0 = new Auth0Client({
+      authorizationParameters: {
+        scope: "openid profile email offline_access"
+      }
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Refresh tokens disabled in Auth0">
+    Check your Auth0 Application settings:
+    
+    1. Go to [Applications](https://manage.auth0.com/#/applications)
+    2. Select your application
+    3. Go to **Advanced Settings** > **Grant Types**
+    4. Enable **Refresh Token**
+  </Accordion>
+  
+  <Accordion title="Social connection doesn't support refresh tokens">
+    Some social providers don't issue refresh tokens.
+    
+    **Check:** Auth0 Dashboard > Authentication > Social
+    
+    **Workaround:** Use silent authentication or re-authentication when tokens expire.
+  </Accordion>
+</AccordionGroup>
+
+### Access token expired
+
+**Symptoms:** API calls fail with 401 Unauthorized.
+
+**Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Automatic refresh (server-side)">
+    The SDK automatically refreshes tokens server-side if a refresh token is available:
+    
+    ```typescript
+    // Automatically refreshes if expired
+    const { token } = await auth0.getAccessToken();
+    ```
+  </Accordion>
+  
+  <Accordion title="Proactive refresh">
+    Refresh tokens slightly before they expire:
+    
+    ```typescript
+    const auth0 = new Auth0Client({
+      tokenRefreshBuffer: 60 // Refresh 60 seconds before expiry
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Handle refresh failures">
+    If refresh fails, prompt user to re-authenticate:
+    
+    ```typescript
+    import { AccessTokenError, AccessTokenErrorCode } from "@auth0/nextjs-auth0/errors";
+    
+    try {
+      const { token } = await auth0.getAccessToken();
+    } catch (error) {
+      if (error.code === AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN) {
+        redirect("/auth/login");
+      }
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### MFA required unexpectedly
+
+**Error code:** `mfa_required`
+
+**Causes & Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Tenant requires MFA step-up">
+    Some API audiences may require MFA even if the user already authenticated.
+    
+    **Handle MFA step-up:**
+    ```typescript
+    import { MfaRequiredError } from "@auth0/nextjs-auth0/errors";
+    
+    try {
+      const { token } = await auth0.getAccessToken({ 
+        audience: "https://api.example.com" 
+      });
+    } catch (error) {
+      if (error instanceof MfaRequiredError) {
+        // Redirect to MFA challenge
+        redirect(`/mfa?token=${error.mfa_token}`);
+      }
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Token lifetime exceeded">
+    Long-lived sessions may trigger MFA re-verification.
+    
+    **Check:** Auth0 Dashboard > Security > Multi-factor Auth > Policies
+    
+    **Fix:** Implement MFA step-up flow in your application.
+  </Accordion>
+</AccordionGroup>
+
+## Configuration Issues
+
+### SDK configuration warnings
+
+**Symptoms:** Console warnings about missing configuration.
+
+**Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Missing required environment variables">
+    Ensure all required variables are set:
+    
+    ```env
+    AUTH0_DOMAIN=your-tenant.us.auth0.com
+    AUTH0_CLIENT_ID=your-client-id
+    AUTH0_CLIENT_SECRET=your-client-secret
+    AUTH0_SECRET=your-32-char-secret
+    ```
+    
+    Generate `AUTH0_SECRET`:
+    ```bash
+    openssl rand -hex 32
+    ```
+  </Accordion>
+  
+  <Accordion title="Invalid domain format">
+    Domain should not include protocol or path:
+    
+    ```env
+    # Wrong
+    AUTH0_DOMAIN=https://your-tenant.us.auth0.com/
+    
+    # Correct
+    AUTH0_DOMAIN=your-tenant.us.auth0.com
+    ```
+  </Accordion>
+  
+  <Accordion title="App base URL misconfiguration">
+    For dynamic environments, omit `APP_BASE_URL`:
+    
+    ```typescript
+    // For preview deployments
+    const auth0 = new Auth0Client();
+    // SDK infers base URL from request
+    ```
+    
+    For static production URLs:
+    ```env
+    APP_BASE_URL=https://app.example.com
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### "Discovery failed" error
+
+**Error code:** `discovery_error`
+
+**Causes & Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Invalid Auth0 domain">
+    Check your domain is correct and accessible:
+    
+    ```bash
+    curl https://YOUR_DOMAIN/.well-known/openid-configuration
+    ```
+    
+    Should return OIDC configuration JSON.
+  </Accordion>
+  
+  <Accordion title="Network/firewall blocking Auth0">
+    Ensure your server can reach Auth0:
+    
+    - Check firewall rules
+    - Verify DNS resolution
+    - Test connectivity: `ping your-tenant.us.auth0.com`
+  </Accordion>
+  
+  <Accordion title="HTTP timeout too short">
+    Increase timeout for slow networks:
+    
+    ```typescript
+    const auth0 = new Auth0Client({
+      httpTimeout: 10000 // 10 seconds
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Next.js Specific Issues
+
+### Middleware not running
+
+**Symptoms:** Auth routes don't work.
+
+**Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Middleware file location">
+    **Next.js 15:**
+    - File: `middleware.ts` in project root (or `src/middleware.ts` if using `src/` directory)
+    
+    **Next.js 16:**
+    - File: `proxy.ts` in project root (or `src/proxy.ts`)
+    - Note: `middleware.ts` still works but only on Edge runtime
+  </Accordion>
+  
+  <Accordion title="Matcher configuration">
+    Ensure matcher includes auth routes:
+    
+    ```typescript
+    export const config = {
+      matcher: [
+        "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)"
+      ]
+    };
+    ```
+  </Accordion>
+  
+  <Accordion title="Multiple middleware files">
+    Only one middleware file is supported. Combine logic:
+    
+    ```typescript
+    export async function middleware(request: NextRequest) {
+      // Auth0 middleware
+      const authResponse = await auth0.middleware(request);
+      if (authResponse) return authResponse;
+      
+      // Your custom middleware
+      return customMiddleware(request);
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Client-side `useUser` returns undefined
+
+**Symptoms:** `useUser()` hook returns `undefined` after successful login.
+
+**Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Missing Auth0Provider">
+    Wrap your app with `Auth0Provider`:
+    
+    ```tsx
+    // app/layout.tsx
+    import { Auth0Provider } from "@auth0/nextjs-auth0/client";
+    
+    export default function RootLayout({ children }) {
+      return (
+        <html>
+          <body>
+            <Auth0Provider>
+              {children}
+            </Auth0Provider>
+          </body>
+        </html>
+      );
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="useUser in Server Component">
+    `useUser` is a client hook. Use `getSession` in Server Components:
+    
+    ```tsx
+    // Server Component
+    import { auth0 } from "@/lib/auth0";
+    
+    export default async function Page() {
+      const session = await auth0.getSession();
+      // ...
+    }
+    ```
+    
+    ```tsx
+    // Client Component
+    "use client";
+    import { useUser } from "@auth0/nextjs-auth0/client";
+    
+    export function UserProfile() {
+      const { user } = useUser();
+      // ...
+    }
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### Build errors with DPoP
+
+**Symptoms:** Build fails when using DPoP features.
+
+**Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Edge runtime compatibility">
+    DPoP requires Node.js runtime. Configure route segment:
+    
+    ```typescript
+    // app/api/route.ts
+    export const runtime = "nodejs"; // Not "edge"
+    ```
+  </Accordion>
+  
+  <Accordion title="CryptoKey serialization">
+    CryptoKey objects can't be serialized. Load keys at runtime:
+    
+    ```typescript
+    // Don't do this at module level
+    const dpopKeyPair = await generateKeyPair("ES256");
+    
+    // Do this - use environment variables
+    const auth0 = new Auth0Client({
+      useDPoP: true
+      // Keys loaded from AUTH0_DPOP_PUBLIC_KEY and AUTH0_DPOP_PRIVATE_KEY
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+## Performance Issues
+
+### Slow authentication
+
+**Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Enable connection caching">
+    Reuse OIDC discovery and JWKS:
+    
+    ```typescript
+    // Auth0Client caches discovery by default
+    // Ensure you're instantiating once and reusing
+    
+    // lib/auth0.ts
+    export const auth0 = new Auth0Client();
+    ```
+  </Accordion>
+  
+  <Accordion title="Reduce token size">
+    - Remove unnecessary scopes
+    - Use shorter custom claim names
+    - Avoid large custom claims
+  </Accordion>
+  
+  <Accordion title="Use stateful sessions for large sessions">
+    Store session data in Redis/database instead of cookies:
+    
+    ```typescript
+    const auth0 = new Auth0Client({
+      sessionStore: new RedisSessionStore()
+    });
+    ```
+  </Accordion>
+</AccordionGroup>
+
+### High memory usage
+
+**Solutions:**
+
+<AccordionGroup>
+  <Accordion title="Instantiate Auth0Client once">
+    Create a single instance and reuse:
+    
+    ```typescript
+    // Good - lib/auth0.ts
+    export const auth0 = new Auth0Client();
+    
+    // Bad - creating new instance per request
+    export function getAuth0() {
+      return new Auth0Client();
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Disable rolling sessions if not needed">
+    Reduces session writes:
+    
+    ```typescript
+    const auth0 = new Auth0Client({
+      session: {
+        rolling: false
+      }
+    });
+    ```
+    
+    **Note:** This may impact security. See [Session Configuration](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#session-configuration).
+  </Accordion>
+</AccordionGroup>
+
+## Debugging Tips
+
+<AccordionGroup>
+  <Accordion title="Enable verbose logging">
+    Check browser console and server logs:
+    
+    ```typescript
+    // Add logging in hooks
+    const auth0 = new Auth0Client({
+      beforeSessionSaved: async (session) => {
+        console.log("Saving session:", session);
+        return session;
+      },
+      onCallback: async (req, session, state) => {
+        console.log("Callback:", { session, state });
+        return { session };
+      }
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Inspect cookies">
+    Use browser DevTools:
+    
+    1. Open DevTools > Application/Storage
+    2. Look for cookies:
+       - Session: `appSession` (default name)
+       - Transaction: `auth_verification`
+    3. Check size, expiry, flags (HttpOnly, Secure, SameSite)
+  </Accordion>
+  
+  <Accordion title="Check Auth0 logs">
+    View authentication logs in Auth0 Dashboard:
+    
+    1. Go to [Monitoring > Logs](https://manage.auth0.com/#/logs)
+    2. Filter by application
+    3. Look for failed login attempts, errors
+  </Accordion>
+  
+  <Accordion title="Verify OIDC configuration">
+    Test discovery endpoint:
+    
+    ```bash
+    curl https://YOUR_DOMAIN/.well-known/openid-configuration
+    ```
+    
+    Verify:
+    - `authorization_endpoint`
+    - `token_endpoint`
+    - `jwks_uri`
+    - Supported `grant_types`
+  </Accordion>
+</AccordionGroup>
+
+## Getting Help
+
+If you're still experiencing issues:
+
+1. **Check existing issues:** [GitHub Issues](https://github.com/auth0/nextjs-auth0/issues)
+2. **Search documentation:** [Auth0 Docs](https://auth0.com/docs)
+3. **Ask the community:** [Auth0 Community](https://community.auth0.com/)
+4. **Report bugs:** [New Issue](https://github.com/auth0/nextjs-auth0/issues/new)
+
+When reporting issues, include:
+- SDK version (`@auth0/nextjs-auth0` version)
+- Next.js version
+- Node.js version
+- Minimal reproduction code
+- Error messages with stack traces
+- Steps to reproduce

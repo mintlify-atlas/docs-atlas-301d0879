@@ -1,0 +1,335 @@
+---
+title: getSession
+description: Retrieve the current user's session data
+---
+
+The `getSession` method retrieves the session data for the currently authenticated user.
+
+## Method Signatures
+
+The method has different signatures depending on the routing context:
+
+<CodeGroup>
+```typescript App Router
+// Server Components, Server Actions, Route Handlers
+await auth0.getSession(): Promise<SessionData | null>
+```
+
+```typescript Pages Router
+// getServerSideProps, API Routes
+await auth0.getSession(
+  req: IncomingMessage | NextApiRequest
+): Promise<SessionData | null>
+```
+
+```typescript Middleware
+// middleware.ts
+await auth0.getSession(
+  req: NextRequest
+): Promise<SessionData | null>
+```
+</CodeGroup>
+
+## Parameters
+
+<ParamField path="req" type="IncomingMessage | NextApiRequest | NextRequest">
+  The request object. Required for Pages Router and middleware, omitted for App Router.
+</ParamField>
+
+## Returns
+
+Returns a `Promise` that resolves to:
+
+- `SessionData` object if the user is authenticated
+- `null` if no active session exists
+
+### SessionData Structure
+
+```typescript
+interface SessionData {
+  user: User;
+  tokenSet: {
+    accessToken: string;
+    idToken: string;
+    refreshToken?: string;
+    expiresAt: number;
+    scope?: string;
+    token_type?: string;
+  };
+  internal: {
+    createdAt: number;
+  };
+  // Additional custom claims
+  [key: string]: any;
+}
+```
+
+## Usage Examples
+
+### App Router
+
+<CodeGroup>
+```typescript Server Component
+import { auth0 } from '@/lib/auth0';
+
+export default async function Dashboard() {
+  const session = await auth0.getSession();
+
+  if (!session) {
+    return <div>Not authenticated</div>;
+  }
+
+  return (
+    <div>
+      <h1>Welcome, {session.user.name}!</h1>
+      <p>Email: {session.user.email}</p>
+    </div>
+  );
+}
+```
+
+```typescript Route Handler
+import { NextResponse } from 'next/server';
+import { auth0 } from '@/lib/auth0';
+
+export async function GET() {
+  const session = await auth0.getSession();
+
+  if (!session) {
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
+
+  return NextResponse.json({
+    user: session.user,
+    tokenExpiry: session.tokenSet.expiresAt
+  });
+}
+```
+
+```typescript Server Action
+import { auth0 } from '@/lib/auth0';
+
+export async function updateProfile(formData: FormData) {
+  'use server';
+  
+  const session = await auth0.getSession();
+
+  if (!session) {
+    throw new Error('Unauthorized');
+  }
+
+  const userId = session.user.sub;
+  // Update user profile...
+}
+```
+</CodeGroup>
+
+### Pages Router
+
+<CodeGroup>
+```typescript getServerSideProps
+import type { GetServerSideProps } from 'next';
+import { auth0 } from '@/lib/auth0';
+
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const session = await auth0.getSession(ctx.req);
+
+  if (!session) {
+    return {
+      redirect: {
+        destination: '/auth/login',
+        permanent: false
+      }
+    };
+  }
+
+  return {
+    props: {
+      user: session.user
+    }
+  };
+};
+
+export default function Page({ user }: { user: any }) {
+  return <div>Hello {user.name}</div>;
+}
+```
+
+```typescript API Route
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { auth0 } from '@/lib/auth0';
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const session = await auth0.getSession(req);
+
+  if (!session) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  res.json({
+    user: session.user,
+    authenticated: true
+  });
+}
+```
+</CodeGroup>
+
+### Middleware
+
+```typescript middleware.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { auth0 } from '@/lib/auth0';
+
+export async function middleware(request: NextRequest) {
+  const authRes = await auth0.middleware(request);
+
+  if (request.nextUrl.pathname.startsWith('/auth')) {
+    return authRes;
+  }
+
+  const session = await auth0.getSession(request);
+
+  if (!session) {
+    return NextResponse.redirect(
+      new URL('/auth/login', request.url)
+    );
+  }
+
+  // User is authenticated
+  return authRes;
+}
+
+export const config = {
+  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)'],
+};
+```
+
+## Accessing Session Data
+
+### User Profile
+
+```typescript
+const session = await auth0.getSession();
+
+if (session) {
+  const userId = session.user.sub;
+  const name = session.user.name;
+  const email = session.user.email;
+  const picture = session.user.picture;
+}
+```
+
+### Token Information
+
+```typescript
+const session = await auth0.getSession();
+
+if (session) {
+  const accessToken = session.tokenSet.accessToken;
+  const idToken = session.tokenSet.idToken;
+  const refreshToken = session.tokenSet.refreshToken;
+  const expiresAt = session.tokenSet.expiresAt;
+  const scope = session.tokenSet.scope;
+}
+```
+
+### Custom Claims
+
+If you've added custom claims via hooks:
+
+```typescript
+const session = await auth0.getSession();
+
+if (session) {
+  const customData = session.customClaim;
+}
+```
+
+## Session Lifecycle
+
+### Creation
+
+Sessions are created after successful authentication via the `/auth/callback` route.
+
+### Expiration
+
+Sessions expire based on:
+
+1. **Absolute Duration**: Maximum session lifetime (default: 3 days)
+2. **Inactivity Duration**: Time of inactivity before expiration (default: 1 day)
+
+Configure in `Auth0Client` constructor:
+
+```typescript
+const auth0 = new Auth0Client({
+  session: {
+    absoluteDuration: 60 * 60 * 24 * 7, // 7 days
+    inactivityDuration: 60 * 60 * 24,   // 1 day
+  }
+});
+```
+
+### Rolling Sessions
+
+When `rolling` is enabled (default), sessions are automatically extended on each request:
+
+```typescript
+const auth0 = new Auth0Client({
+  session: {
+    rolling: true // default
+  }
+});
+```
+
+## Error Handling
+
+`getSession` returns `null` when:
+
+- No session cookie exists
+- Session cookie is invalid or tampered
+- Session has expired
+- Session decryption fails
+
+```typescript
+const session = await auth0.getSession();
+
+if (!session) {
+  // Handle unauthenticated state
+  return redirect('/auth/login');
+}
+
+// User is authenticated
+```
+
+## Important Notes
+
+<Note>
+  The `getSession` method returns a complete session object containing the user profile and all available tokens (access token, ID token, and refresh token when present).
+  
+  For API access with automatic token refresh, use [`getAccessToken`](/server/get-access-token) instead.
+</Note>
+
+<Warning>
+  In middleware, you must pass the `request` object to `getSession(request)` to ensure session updates can be read within the same request.
+</Warning>
+
+<Note>
+  Session data is encrypted in cookies by default. For database-backed sessions, configure a custom [session store](/server/session-stores).
+</Note>
+
+## Related Methods
+
+<CardGroup cols={2}>
+  <Card title="updateSession" icon="pen-to-square" href="/server/update-session">
+    Update session data
+  </Card>
+  <Card title="getAccessToken" icon="key" href="/server/get-access-token">
+    Get access tokens with refresh
+  </Card>
+</CardGroup>

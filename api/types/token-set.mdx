@@ -1,0 +1,328 @@
+---
+title: 'TokenSet'
+description: 'Represents OAuth 2.0 tokens returned by the authorization server'
+---
+
+## Overview
+
+The `TokenSet` interface represents the collection of tokens returned by Auth0 after successful authentication or token refresh. It includes access tokens, ID tokens, refresh tokens, and associated metadata.
+
+## Type Definition
+
+```typescript
+export interface TokenSet {
+  accessToken: string;
+  idToken?: string;
+  scope?: string;
+  requestedScope?: string;
+  refreshToken?: string;
+  expiresAt: number; // the time at which the access token expires in seconds since epoch
+  audience?: string;
+  token_type?: string; // the type of the access token (e.g., "Bearer", "DPoP")
+}
+```
+
+## Properties
+
+<ResponseField name="accessToken" type="string" required>
+  The access token issued by Auth0. This token is used to authenticate requests to your API or resource server.
+</ResponseField>
+
+<ResponseField name="idToken" type="string">
+  The ID token containing user profile information as JWT claims. This token follows the OpenID Connect specification and contains information about the authenticated user.
+</ResponseField>
+
+<ResponseField name="scope" type="string">
+  The actual scope granted by the authorization server. This may differ from the requested scope if the server grants fewer permissions than requested.
+</ResponseField>
+
+<ResponseField name="requestedScope" type="string">
+  The scope that was originally requested during authentication.
+</ResponseField>
+
+<ResponseField name="refreshToken" type="string">
+  The refresh token that can be used to obtain new access tokens without requiring the user to re-authenticate. This is only present when the `offline_access` scope is requested.
+</ResponseField>
+
+<ResponseField name="expiresAt" type="number" required>
+  Unix timestamp (in seconds since epoch) indicating when the access token expires. Use this to determine if the token needs to be refreshed.
+</ResponseField>
+
+<ResponseField name="audience" type="string">
+  The intended audience for the access token. This identifies the API or resource server that the token is intended for.
+</ResponseField>
+
+<ResponseField name="token_type" type="string">
+  The type of the access token. Common values:
+  - `"Bearer"` - Standard OAuth 2.0 bearer token (default)
+  - `"DPoP"` - Demonstrating Proof-of-Possession token (when DPoP is enabled)
+</ResponseField>
+
+## Usage Examples
+
+### Get Access Token in Server Components
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export default async function APIDataPage() {
+  try {
+    const { token, expiresAt, scope, audience } = await auth0.getAccessToken();
+    
+    // Use the token to call your API
+    const response = await fetch('https://api.example.com/data', {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+    
+    const data = await response.json();
+    
+    return (
+      <div>
+        <h1>API Data</h1>
+        <pre>{JSON.stringify(data, null, 2)}</pre>
+        <p>Token expires: {new Date(expiresAt * 1000).toISOString()}</p>
+      </div>
+    );
+  } catch (error) {
+    return <div>Error: {error.message}</div>;
+  }
+}
+```
+
+### Get Token with Specific Audience
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export async function GET() {
+  try {
+    // Get token for a specific API
+    const { token, expiresAt, audience } = await auth0.getAccessToken({
+      audience: 'https://api.example.com',
+      scope: 'read:data write:data'
+    });
+    
+    return Response.json({
+      token,
+      expiresAt,
+      audience
+    });
+  } catch (error) {
+    return Response.json(
+      { error: error.message },
+      { status: 401 }
+    );
+  }
+}
+```
+
+### Force Token Refresh
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export async function POST() {
+  const session = await auth0.getSession();
+  
+  if (!session) {
+    return Response.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+  
+  // Force refresh even if current token is valid
+  const { token, expiresAt } = await auth0.getAccessToken({
+    refresh: true
+  });
+  
+  return Response.json({
+    message: 'Token refreshed',
+    expiresAt: new Date(expiresAt * 1000).toISOString()
+  });
+}
+```
+
+### Check Token Expiration
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export async function isTokenExpired(): Promise<boolean> {
+  const session = await auth0.getSession();
+  
+  if (!session) {
+    return true;
+  }
+  
+  const now = Math.floor(Date.now() / 1000);
+  const buffer = 60; // 60 second buffer
+  
+  return session.tokenSet.expiresAt <= (now + buffer);
+}
+
+export async function getValidToken(): Promise<string> {
+  if (await isTokenExpired()) {
+    const { token } = await auth0.getAccessToken({ refresh: true });
+    return token;
+  }
+  
+  const session = await auth0.getSession();
+  return session!.tokenSet.accessToken;
+}
+```
+
+### Multi-Resource Refresh Tokens (MRRT)
+
+When using multiple APIs with different audiences:
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export async function GET() {
+  const session = await auth0.getSession();
+  
+  if (!session) {
+    return Response.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+  
+  // Get token for API 1
+  const api1Token = await auth0.getAccessToken({
+    audience: 'https://api1.example.com'
+  });
+  
+  // Get token for API 2
+  const api2Token = await auth0.getAccessToken({
+    audience: 'https://api2.example.com'
+  });
+  
+  // Both tokens are now cached in session.accessTokens
+  return Response.json({
+    api1: {
+      audience: api1Token.audience,
+      expiresAt: api1Token.expiresAt
+    },
+    api2: {
+      audience: api2Token.audience,
+      expiresAt: api2Token.expiresAt
+    }
+  });
+}
+```
+
+### Use with API Routes (Pages Router)
+
+```typescript
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { auth0 } from '@/lib/auth0';
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  try {
+    const { token, expiresAt, scope } = await auth0.getAccessToken(req, res);
+    
+    // Call external API
+    const apiResponse = await fetch('https://api.example.com/data', {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+    
+    const data = await apiResponse.json();
+    
+    res.json({
+      data,
+      tokenInfo: {
+        expiresAt: new Date(expiresAt * 1000).toISOString(),
+        scope
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: error.message });
+  }
+}
+```
+
+## Token Refresh Behavior
+
+The SDK automatically handles token refresh when:
+
+1. **Access token is expired** - If the current time is past `expiresAt`
+2. **Refresh is forced** - When `refresh: true` is passed to `getAccessToken()`
+3. **Token refresh buffer** - When configured, tokens are refreshed before expiration
+
+```typescript
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+export const auth0 = new Auth0Client({
+  // Refresh tokens 60 seconds before expiration
+  tokenRefreshBuffer: 60,
+  
+  // Request offline_access scope for refresh tokens
+  authorizationParameters: {
+    scope: 'openid profile email offline_access'
+  }
+});
+```
+
+## DPoP Tokens
+
+When DPoP (Demonstrating Proof-of-Possession) is enabled, tokens are cryptographically bound to the client:
+
+```typescript
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+import { generateKeyPair } from 'oauth4webapi';
+
+const dpopKeyPair = await generateKeyPair('ES256');
+
+export const auth0 = new Auth0Client({
+  useDPoP: true,
+  dpopKeyPair
+});
+
+// Tokens will have token_type: "DPoP"
+const { token, token_type } = await auth0.getAccessToken();
+console.log(token_type); // "DPoP"
+```
+
+## Client-Side Token Access
+
+For browser-based apps that need tokens (not recommended for most apps):
+
+```typescript
+'use client';
+
+import { getAccessToken } from '@auth0/nextjs-auth0/client';
+
+export default function APIClient() {
+  async function callAPI() {
+    try {
+      const { token } = await getAccessToken();
+      
+      const response = await fetch('https://api.example.com/data', {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      
+      const data = await response.json();
+      console.log(data);
+    } catch (error) {
+      console.error('API call failed:', error);
+    }
+  }
+  
+  return <button onClick={callAPI}>Call API</button>;
+}
+```
+
+<Warning>
+  **Security Best Practice**: Avoid exposing access tokens to the browser when possible. Use a Token Mediating Backend pattern where your Next.js API routes call external APIs on behalf of the client.
+</Warning>
+
+## See Also
+
+- [SessionData](/api/types/session-data) - Complete session interface
+- [User](/api/types/user) - User profile information
+- [Configuration](/api/types/configuration) - Token configuration options

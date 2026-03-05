@@ -1,0 +1,597 @@
+---
+title: Security
+description: Security best practices and considerations for the Auth0 Next.js SDK
+---
+
+This document outlines important security considerations and best practices when using the Auth0 Next.js SDK.
+
+## Cookies and Security
+
+The SDK uses HTTP-only, secure cookies for session management with built-in protections against common attacks.
+
+### Cookie Security Flags
+
+All cookies are automatically configured with security flags:
+
+<ParamField path="HttpOnly" type="boolean" default="true">
+  **Always enabled.** Prevents client-side JavaScript from accessing the cookie, reducing the attack surface for XSS (Cross-Site Scripting) attacks.
+  
+  This flag cannot be disabled.
+</ParamField>
+
+<ParamField path="SameSite" type="string" default="Lax">
+  Set to `Lax` by default to help mitigate CSRF (Cross-Site Request Forgery) attacks.
+  
+  - `Lax`: Cookies sent with top-level navigation and same-site requests
+  - `Strict`: Cookies only sent with same-site requests
+  - `None`: Cookies sent with all requests (requires `Secure` flag)
+  
+  Learn more: [Browser Behavior Changes: What Developers Need to Know](https://auth0.com/blog/browser-behavior-changes-what-developers-need-to-know/)
+</ParamField>
+
+<ParamField path="Secure" type="boolean">
+  Automatically set to `true` when `APP_BASE_URL` uses `https://`.
+  
+  Ensures cookies are only transmitted over HTTPS connections, preventing interception over insecure networks.
+  
+  **Important:** When using dynamic base URLs in production, the SDK enforces `secure: true`. Explicitly setting `secure: false` will throw `InvalidConfigurationError`.
+</ParamField>
+
+### Cookie Configuration
+
+Customize cookie settings via configuration or environment variables:
+
+```typescript
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      domain: ".example.com",     // Cookie domain
+      path: "/",                  // Cookie path
+      secure: true,               // HTTPS only
+      sameSite: "lax",            // CSRF protection
+      transient: false            // Persist across browser sessions
+    }
+  }
+});
+```
+
+**Environment variables:**
+
+```env
+AUTH0_COOKIE_DOMAIN=.example.com
+AUTH0_COOKIE_PATH=/
+AUTH0_COOKIE_SECURE=true
+AUTH0_COOKIE_SAME_SITE=lax
+AUTH0_COOKIE_TRANSIENT=false
+```
+
+<Warning>
+**Never disable HttpOnly.** The SDK always sets `httpOnly: true` and does not allow it to be disabled.
+</Warning>
+
+## Session Security
+
+### Session Encryption
+
+All session data is encrypted using AES-256-GCM before being stored in cookies.
+
+**Generate a strong secret:**
+
+```bash
+openssl rand -hex 32
+```
+
+```env
+AUTH0_SECRET=your-64-character-hex-string
+```
+
+<Warning>
+**Keep your `AUTH0_SECRET` secure:**
+- Never commit to source control
+- Use different secrets for each environment
+- Rotate secrets periodically
+- Minimum 32 bytes (64 hex characters)
+</Warning>
+
+### Rolling Sessions
+
+The SDK uses rolling sessions by default, which automatically extends the session expiry on each request.
+
+**Benefits:**
+- Active users stay logged in
+- Idle sessions expire
+- Reduces re-authentication friction
+
+**Security consideration:**
+
+Rolling sessions generate a `Set-Cookie` header on every request that touches the session. This means:
+
+<Warning>
+**Never cache responses that read the session**, even if the content appears safe to cache. The `Set-Cookie` header contains sensitive session data and must not be cached by CDNs or edge networks.
+</Warning>
+
+```typescript
+// These functions read the session and should NOT be cached:
+await auth0.getSession();
+await auth0.getAccessToken();
+```
+
+### Session Duration
+
+Configure session timeouts to balance security and user experience:
+
+```typescript
+const auth0 = new Auth0Client({
+  session: {
+    rolling: true,
+    rollingDuration: 86400,  // 24 hours - session extends on activity
+    absoluteDuration: 604800 // 7 days - maximum session lifetime
+  }
+});
+```
+
+- **Rolling duration:** How long the session lasts without activity
+- **Absolute duration:** Maximum session lifetime regardless of activity
+
+<Tip>
+**Best practice:** Set `absoluteDuration` to match your security requirements. High-security applications should use shorter durations (e.g., 1-4 hours).
+</Tip>
+
+### Stateful Sessions
+
+For enhanced security or large sessions, store session data server-side:
+
+```typescript
+import { Auth0Client, AbstractSessionStore } from "@auth0/nextjs-auth0/server";
+import { Redis } from "ioredis";
+
+class RedisSessionStore extends AbstractSessionStore {
+  private redis = new Redis();
+  
+  async get(sid: string) {
+    const data = await this.redis.get(`session:${sid}`);
+    return data ? JSON.parse(data) : null;
+  }
+  
+  async set(sid: string, session: any, ttl: number) {
+    await this.redis.setex(`session:${sid}`, ttl, JSON.stringify(session));
+  }
+  
+  async delete(sid: string) {
+    await this.redis.del(`session:${sid}`);
+  }
+}
+
+const auth0 = new Auth0Client({
+  sessionStore: new RedisSessionStore()
+});
+```
+
+**Benefits:**
+- No 4KB cookie size limit
+- Server-side session revocation
+- Reduced client-side data exposure
+
+See [Database sessions](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#database-sessions) for details.
+
+## Token Security
+
+### Access Token Storage
+
+Access tokens are stored encrypted in the session cookie (or session store).
+
+<Warning>
+**Never expose access tokens to the client** unless absolutely necessary. Use server-side API routes to call external APIs:
+
+```typescript
+// app/api/data/route.ts
+import { auth0 } from "@/lib/auth0";
+
+export async function GET() {
+  const { token } = await auth0.getAccessToken();
+  
+  const response = await fetch("https://api.example.com/data", {
+    headers: { Authorization: `Bearer ${token}` }
+  });
+  
+  return response;
+}
+```
+</Warning>
+
+### Refresh Token Security
+
+Refresh tokens are long-lived credentials that can obtain new access tokens.
+
+**Best practices:**
+
+<AccordionGroup>
+  <Accordion title="Request offline_access scope">
+    Only request refresh tokens when needed:
+    
+    ```typescript
+    const auth0 = new Auth0Client({
+      authorizationParameters: {
+        scope: "openid profile email offline_access"
+      }
+    });
+    ```
+  </Accordion>
+  
+  <Accordion title="Enable Refresh Token Rotation">
+    Configure in Auth0 Dashboard:
+    
+    1. Go to Applications > Your App > Advanced Settings
+    2. Enable **Refresh Token Rotation**
+    3. Enable **Refresh Token Reuse Detection**
+    
+    This issues a new refresh token on each use and invalidates the old one, detecting token theft.
+  </Accordion>
+  
+  <Accordion title="Set appropriate lifetimes">
+    Configure in Auth0 Dashboard:
+    
+    1. Go to Applications > Your App > Advanced Settings
+    2. Set **Refresh Token Expiration** based on security requirements
+    3. Enable **Inactivity Expiration** to expire tokens after periods of inactivity
+  </Accordion>
+</AccordionGroup>
+
+### Token Refresh Buffer
+
+Refresh tokens proactively to avoid expiration mid-request:
+
+```typescript
+const auth0 = new Auth0Client({
+  tokenRefreshBuffer: 60 // Refresh 60 seconds before expiry
+});
+```
+
+## XSS Protection
+
+### Error Message Handling
+
+<Warning>
+**Critical:** OAuth errors may contain reflected user input via the `error` and `error_description` query parameters.
+
+**Never render these values directly** without escaping to prevent XSS attacks.
+</Warning>
+
+```typescript
+import { OAuth2Error } from "@auth0/nextjs-auth0/errors";
+
+try {
+  await auth0.handleCallback(request);
+} catch (error) {
+  if (error instanceof OAuth2Error) {
+    // ❌ UNSAFE - may contain malicious input
+    return <div>{error.message}</div>;
+    
+    // ✅ SAFE - escaped by template engine
+    return <div>{escapeHtml(error.message)}</div>;
+    
+    // ✅ SAFE - React automatically escapes
+    return <div>{error.message}</div>;
+  }
+}
+```
+
+See the [OWASP XSS Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html) for proper escaping techniques.
+
+### Content Security Policy
+
+Implement CSP headers to mitigate XSS:
+
+```typescript
+// middleware.ts
+export async function middleware(request: NextRequest) {
+  const response = await auth0.middleware(request);
+  
+  response.headers.set(
+    "Content-Security-Policy",
+    "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline';"
+  );
+  
+  return response;
+}
+```
+
+## CSRF Protection
+
+The SDK provides built-in CSRF protection through:
+
+1. **SameSite cookies:** Default `Lax` setting prevents CSRF attacks
+2. **State parameter:** Validated on OAuth callback
+3. **Transaction cookies:** Bind authentication state to the session
+
+### Custom CSRF Protection
+
+For additional protection on custom routes:
+
+```typescript
+import { randomBytes } from "crypto";
+
+// Generate CSRF token
+const csrfToken = randomBytes(32).toString("hex");
+
+// Store in session
+const session = await auth0.getSession();
+session.csrfToken = csrfToken;
+
+// Validate on form submission
+if (formToken !== session.csrfToken) {
+  throw new Error("Invalid CSRF token");
+}
+```
+
+## Input Validation
+
+<Warning>
+**Always validate user inputs,** especially redirect URLs, to prevent open redirect vulnerabilities.
+</Warning>
+
+### Safe Redirect Handling
+
+```typescript
+// ❌ UNSAFE - arbitrary redirect
+const returnTo = request.nextUrl.searchParams.get("returnTo");
+redirect(returnTo);
+
+// ✅ SAFE - validate against allowlist
+const returnTo = request.nextUrl.searchParams.get("returnTo");
+const safeUrls = ["/dashboard", "/profile", "/settings"];
+
+if (safeUrls.includes(returnTo)) {
+  redirect(returnTo);
+} else {
+  redirect("/"); // Default safe redirect
+}
+
+// ✅ SAFE - use relative URLs only
+if (returnTo?.startsWith("/") && !returnTo.startsWith("//")) {
+  redirect(returnTo);
+} else {
+  redirect("/");
+}
+```
+
+### beforeSessionSaved Hook Validation
+
+```typescript
+const auth0 = new Auth0Client({
+  beforeSessionSaved: async (session) => {
+    // Validate user metadata before persisting
+    if (session.user.email && !isValidEmail(session.user.email)) {
+      throw new Error("Invalid email");
+    }
+    return session;
+  }
+});
+```
+
+## DPoP (Demonstrating Proof-of-Possession)
+
+DPoP binds access tokens to cryptographic key pairs, preventing token theft and replay attacks.
+
+### Enable DPoP
+
+```typescript
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+import { generateKeyPair } from "oauth4webapi";
+
+const dpopKeyPair = await generateKeyPair("ES256");
+
+const auth0 = new Auth0Client({
+  useDPoP: true,
+  dpopKeyPair
+});
+```
+
+**Benefits:**
+- Prevents token theft (stolen tokens are useless without private key)
+- Prevents replay attacks (proof is bound to request)
+- Enhanced security for high-value transactions
+
+**Key management:**
+
+<Warning>
+**Protect DPoP private keys:**
+- Store in environment variables or secrets manager
+- Never expose to client-side code
+- Rotate keys periodically
+- Use hardware security modules (HSM) for production
+</Warning>
+
+```env
+AUTH0_DPOP_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----
+MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...
+-----END PUBLIC KEY-----"
+
+AUTH0_DPOP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----
+MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQ...
+-----END PRIVATE KEY-----"
+```
+
+See [DPoP Examples](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#dpop-demonstrating-proof-of-possession) for details.
+
+## Caching Security
+
+<Warning>
+**Critical:** Never cache responses that require authentication or touch the session.
+</Warning>
+
+Many hosting providers (Vercel, Netlify) cache responses at the edge. Caching authenticated responses can:
+
+1. **Expose session cookies** via cached `Set-Cookie` headers
+2. **Leak user data** to other users
+3. **Bypass authentication checks**
+
+### What NOT to Cache
+
+Never cache responses from:
+- `auth0.getSession()`
+- `auth0.getAccessToken()`
+- `useUser()` hook
+- Any route that checks authentication
+- Rolling session responses (contain `Set-Cookie`)
+
+### Safe Caching
+
+Only cache:
+- Public, unauthenticated content
+- Static assets
+- API responses that don't require authentication
+
+```typescript
+// Safe - public data
+export async function GET() {
+  const data = await fetchPublicData();
+  return Response.json(data, {
+    headers: {
+      "Cache-Control": "public, max-age=3600"
+    }
+  });
+}
+
+// Unsafe - authenticated data
+export async function GET() {
+  const session = await auth0.getSession();
+  return Response.json(session, {
+    headers: {
+      "Cache-Control": "private, no-cache, no-store, must-revalidate"
+    }
+  });
+}
+```
+
+## Dynamic Base URLs
+
+For preview environments (Vercel, Netlify), the SDK can infer the base URL from the request host.
+
+<Warning>
+**Security note:** The `Host` header is untrusted user input. Auth0's **Allowed Callback URLs** act as the security boundary. If the inferred host is not registered in Auth0, the authorization request will be rejected.
+</Warning>
+
+```typescript
+// Dynamic base URL (preview environments)
+const auth0 = new Auth0Client();
+// Infers from request.headers.get("host")
+```
+
+**Security enforcements:**
+
+1. **Secure cookies enforced:** When using dynamic base URLs in production, `secure: false` throws `InvalidConfigurationError`
+2. **Callback URL validation:** Auth0 validates the callback URL against your registered URLs
+3. **Protocol inference:** HTTPS is assumed for security
+
+**Best practice:** Use static `APP_BASE_URL` in production:
+
+```env
+# Production
+APP_BASE_URL=https://app.example.com
+
+# Preview (omit or leave empty)
+# APP_BASE_URL=
+```
+
+## Logout Security
+
+### OIDC Logout
+
+The SDK supports OIDC logout with optional `id_token_hint`:
+
+```typescript
+const auth0 = new Auth0Client({
+  logoutStrategy: "oidc",
+  includeIdTokenHintInOIDCLogoutUrl: true // Default, recommended
+});
+```
+
+**Security tradeoff:**
+
+| `includeIdTokenHintInOIDCLogoutUrl` | Security Benefit | Privacy Impact |
+|-------------------------------------|------------------|----------------|
+| `true` (default) | Better DoS protection | ID token in logout URL (PII in logs) |
+| `false` | No PII in logout URLs | Reduced DoS protection |
+
+See [OIDC logout privacy configuration](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#oidc-logout-privacy-configuration) for details.
+
+### Backchannel Logout
+
+Implement backchannel logout for server-initiated session termination:
+
+1. Configure backchannel logout URI in Auth0 Dashboard:
+   - `https://yourdomain.com/auth/backchannel-logout`
+2. The SDK automatically handles logout token validation
+3. Sessions are terminated immediately
+
+See [Auth0 Back-Channel Logout](https://auth0.com/docs/authenticate/login/logout/back-channel-logout) for details.
+
+## Vulnerability Reporting
+
+<Warning>
+**Do not report security vulnerabilities on the public GitHub issue tracker.**
+</Warning>
+
+Please report security issues through Auth0's [Responsible Disclosure Program](https://auth0.com/responsible-disclosure-policy).
+
+## Security Checklist
+
+<AccordionGroup>
+  <Accordion title="Configuration Security">
+    - [ ] Use strong `AUTH0_SECRET` (32+ bytes, hex-encoded)
+    - [ ] Rotate secrets periodically
+    - [ ] Never commit secrets to source control
+    - [ ] Use different secrets per environment
+    - [ ] Enable Refresh Token Rotation in Auth0 Dashboard
+  </Accordion>
+  
+  <Accordion title="Cookie Security">
+    - [ ] Use `secure: true` in production (HTTPS)
+    - [ ] Keep `httpOnly: true` (always enforced)
+    - [ ] Set appropriate `sameSite` value
+    - [ ] Configure appropriate session durations
+    - [ ] Never disable security flags
+  </Accordion>
+  
+  <Accordion title="Token Security">
+    - [ ] Store tokens server-side only
+    - [ ] Request minimum required scopes
+    - [ ] Use token refresh buffer
+    - [ ] Implement token refresh error handling
+    - [ ] Consider DPoP for high-security apps
+  </Accordion>
+  
+  <Accordion title="Input Validation">
+    - [ ] Validate all redirect URLs
+    - [ ] Escape OAuth error messages
+    - [ ] Sanitize user inputs in hooks
+    - [ ] Implement CSRF tokens for custom forms
+    - [ ] Use allowlists for redirects
+  </Accordion>
+  
+  <Accordion title="Caching">
+    - [ ] Never cache authenticated responses
+    - [ ] Check hosting provider caching rules
+    - [ ] Set appropriate `Cache-Control` headers
+    - [ ] Verify `Set-Cookie` not cached
+  </Accordion>
+  
+  <Accordion title="Auth0 Configuration">
+    - [ ] Register all callback URLs in Auth0 Dashboard
+    - [ ] Enable Refresh Token Rotation
+    - [ ] Configure appropriate token lifetimes
+    - [ ] Enable MFA for sensitive operations
+    - [ ] Review Auth0 logs regularly
+  </Accordion>
+</AccordionGroup>
+
+## Additional Resources
+
+- [Auth0 Security Documentation](https://auth0.com/docs/secure)
+- [OWASP Top 10](https://owasp.org/www-project-top-ten/)
+- [OWASP XSS Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross_Site_Scripting_Prevention_Cheat_Sheet.html)
+- [OWASP CSRF Prevention Cheat Sheet](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html)
+- [RFC 9449: OAuth 2.0 DPoP](https://datatracker.ietf.org/doc/html/rfc9449)

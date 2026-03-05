@@ -1,0 +1,299 @@
+---
+title: withPageAuthRequired (Client)
+description: Higher-order component to protect client-side pages
+---
+
+`withPageAuthRequired` is a higher-order component (HOC) that protects client-side pages by redirecting unauthenticated users to the login page. After login, users are automatically returned to the page they were trying to access.
+
+<Note>
+  This is the **client-side** version for React components. For server-side page protection, see [withPageAuthRequired (Server)](/api/server/with-page-auth-required).
+</Note>
+
+## Usage
+
+### Basic Protection
+
+```tsx
+'use client';
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+
+function ProfilePage({ user }) {
+  return (
+    <div>
+      <h1>Welcome, {user.name}!</h1>
+      <img src={user.picture} alt={user.name} />
+      <p>Email: {user.email}</p>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(ProfilePage);
+```
+
+### Custom Redirect Path
+
+```tsx
+export default withPageAuthRequired(ProfilePage, {
+  returnTo: '/dashboard'
+});
+```
+
+### Custom Loading State
+
+```tsx
+export default withPageAuthRequired(ProfilePage, {
+  onRedirecting: () => (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="spinner" />
+      <p>Redirecting to login...</p>
+    </div>
+  )
+});
+```
+
+### Custom Error Handling
+
+```tsx
+export default withPageAuthRequired(ProfilePage, {
+  onError: (error) => (
+    <div className="error-container">
+      <h1>Authentication Error</h1>
+      <p>{error.message}</p>
+      <a href="/auth/login">Try logging in again</a>
+    </div>
+  )
+});
+```
+
+## Signature
+
+```typescript
+function withPageAuthRequired<P extends object>(
+  Component: ComponentType<P & UserProps>,
+  options?: WithPageAuthRequiredOptions
+): React.FC<P>
+```
+
+## Parameters
+
+<ParamField path="Component" type="ComponentType<P & UserProps>" required>
+  The React component to protect. The component will receive a `user` prop containing the authenticated user's profile.
+  
+  ```tsx
+  function MyPage({ user }: { user: User }) {
+    return <div>Hello {user.name}</div>;
+  }
+  
+  export default withPageAuthRequired(MyPage);
+  ```
+</ParamField>
+
+<ParamField path="options" type="WithPageAuthRequiredOptions" optional>
+  Configuration options for the HOC.
+  
+  <Expandable title="properties">
+    <ParamField path="returnTo" type="string" optional>
+      The path to return the user to after login. By default, users are returned to the page they were trying to access (including query parameters and hash).
+      
+      ```tsx
+      withPageAuthRequired(ProfilePage, {
+        returnTo: '/profile'
+      });
+      ```
+    </ParamField>
+    
+    <ParamField path="onRedirecting" type="() => JSX.Element" optional>
+      A function that returns a React element to display while redirecting to the login page.
+      
+      Default: Returns an empty fragment `<></>`
+      
+      ```tsx
+      withPageAuthRequired(ProfilePage, {
+        onRedirecting: () => <div>Redirecting...</div>
+      });
+      ```
+    </ParamField>
+    
+    <ParamField path="onError" type="(error: Error) => JSX.Element" optional>
+      A function that returns a React element to display when an error occurs while fetching the user profile.
+      
+      Default: Returns an empty fragment `<></>`
+      
+      ```tsx
+      withPageAuthRequired(ProfilePage, {
+        onError: (error) => <div>Error: {error.message}</div>
+      });
+      ```
+    </ParamField>
+  </Expandable>
+</ParamField>
+
+## Return Value
+
+Returns a wrapped React component that:
+
+1. Checks if the user is authenticated using `useUser()`
+2. Redirects to login if not authenticated
+3. Shows the loading state while checking authentication
+4. Shows the error state if authentication check fails
+5. Renders the protected component with the `user` prop if authenticated
+
+## UserProps Type
+
+The protected component receives a `user` prop with the following type:
+
+```typescript
+interface UserProps {
+  user: User;
+}
+
+interface User {
+  sub: string;                  // User ID (required)
+  name?: string;                // Full name
+  nickname?: string;            // Nickname
+  given_name?: string;          // First name
+  family_name?: string;         // Last name
+  picture?: string;             // Profile picture URL
+  email?: string;               // Email address
+  email_verified?: boolean;     // Email verification status
+  org_id?: string;              // Organization ID
+  [key: string]: any;           // Additional custom claims
+}
+```
+
+## How It Works
+
+1. **Authentication Check**: Uses `useUser()` to fetch the current user
+2. **Redirect Logic**: If not authenticated, redirects to `/auth/login?returnTo=<current-page>`
+3. **Return Path**: After login, Auth0 redirects back to the `returnTo` URL
+4. **Loading State**: Shows `onRedirecting()` while checking authentication
+5. **Error State**: Shows `onError()` if the profile fetch fails
+
+## Configuration
+
+The login endpoint can be customized using the `NEXT_PUBLIC_LOGIN_ROUTE` environment variable:
+
+```bash
+NEXT_PUBLIC_LOGIN_ROUTE=/api/custom-login
+```
+
+## Examples
+
+### Complete Protected Page
+
+```tsx
+'use client';
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+import type { User } from '@auth0/nextjs-auth0/types';
+
+interface DashboardPageProps {
+  user: User;
+}
+
+function DashboardPage({ user }: DashboardPageProps) {
+  return (
+    <div>
+      <header>
+        <h1>Dashboard</h1>
+        <div>
+          <img src={user.picture} alt={user.name} />
+          <span>{user.name}</span>
+        </div>
+      </header>
+      <main>
+        <p>Welcome to your dashboard, {user.given_name}!</p>
+      </main>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(DashboardPage, {
+  onRedirecting: () => (
+    <div className="loading-screen">
+      <div className="spinner" />
+      <p>Loading your dashboard...</p>
+    </div>
+  ),
+  onError: (error) => (
+    <div className="error-screen">
+      <h1>Oops! Something went wrong</h1>
+      <p>{error.message}</p>
+      <button onClick={() => window.location.reload()}>
+        Try Again
+      </button>
+    </div>
+  )
+});
+```
+
+### With TypeScript
+
+```tsx
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+import type { UserProps } from '@auth0/nextjs-auth0';
+
+interface ProfilePageProps {
+  theme: 'light' | 'dark';
+}
+
+function ProfilePage({ user, theme }: ProfilePageProps & UserProps) {
+  return (
+    <div className={theme}>
+      <h1>{user.name}'s Profile</h1>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(ProfilePage);
+```
+
+### Pages Router Example
+
+```tsx
+// pages/profile.tsx
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+import type { UserProps } from '@auth0/nextjs-auth0';
+
+function Profile({ user }: UserProps) {
+  return <div>Hello {user.name}</div>;
+}
+
+export default withPageAuthRequired(Profile);
+```
+
+### App Router Example
+
+```tsx
+// app/profile/page.tsx (Client Component)
+'use client';
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+import type { UserProps } from '@auth0/nextjs-auth0';
+
+function ProfilePage({ user }: UserProps) {
+  return <div>Hello {user.name}</div>;
+}
+
+export default withPageAuthRequired(ProfilePage);
+```
+
+## Client vs Server Protection
+
+| Feature | Client (`withPageAuthRequired`) | Server (`withPageAuthRequired`) |
+|---------|----------------------------------|----------------------------------|
+| Execution | Browser | Server |
+| Redirect | Client-side navigation | Server-side redirect (302) |
+| SEO | Poor (protected content not rendered) | Good (redirect before render) |
+| Performance | Flash of loading state | No flash, immediate redirect |
+| Use Case | Interactive client components | Static pages, SEO-important pages |
+
+**Recommendation**: Prefer server-side protection for better UX and SEO. Use client-side protection only for dynamic client components that can't be server-rendered.
+
+## Notes
+
+- Requires `Auth0Provider` to be configured in your app
+- The protected component must be a client component (marked with `"use client"`)
+- The `user` prop is automatically injected into your component
+- For server-side protection with better performance and SEO, use the server version

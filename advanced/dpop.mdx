@@ -1,0 +1,509 @@
+---
+title: 'DPoP (Demonstrating Proof-of-Possession)'
+description: 'Learn how to implement DPoP for enhanced OAuth 2.0 security in your Next.js application'
+---
+
+## Overview
+
+DPoP (Demonstrating Proof-of-Possession) is an OAuth 2.0 extension that enhances security by binding access tokens to a client's private key. This prevents token theft and replay attacks by requiring cryptographic proof that the client possessing the token also possesses the private key used to request it.
+
+### What is DPoP?
+
+DPoP provides application-level proof-of-possession security for OAuth 2.0 with the following benefits:
+
+- **Token Binding**: Access tokens are cryptographically bound to the client's key pair
+- **Theft Protection**: Stolen tokens cannot be used without the corresponding private key
+- **Replay Attack Prevention**: Each request includes a unique proof-of-possession signature
+- **Enhanced Security**: Complements OAuth 2.0 with additional cryptographic guarantees
+
+<Info>
+DPoP uses ES256 (ECDSA with P-256 and SHA-256) key pairs for cryptographic operations.
+</Info>
+
+## Basic Setup
+
+Choose one of three setup methods based on your deployment strategy:
+
+### Option 1: Environment Variables (Recommended for Production)
+
+For production deployments with pre-generated keys:
+
+<Steps>
+  <Step title="Generate DPoP key pair">
+    Use the SDK to generate keys:
+
+    ```typescript
+    import { generateDpopKeyPair } from "@auth0/nextjs-auth0/server";
+    import { exportPKCS8, exportSPKI } from "jose";
+
+    // Generate new key pair and export for environment variables
+    const keyPair = await generateDpopKeyPair();
+    const publicKeyPem = await exportSPKI(keyPair.publicKey);
+    const privateKeyPem = await exportPKCS8(keyPair.privateKey);
+
+    // Copy these values to your .env.local file
+    console.log("AUTH0_DPOP_PUBLIC_KEY=" + publicKeyPem);
+    console.log("AUTH0_DPOP_PRIVATE_KEY=" + privateKeyPem);
+    ```
+  </Step>
+
+  <Step title="Add keys to environment variables">
+    Store the generated keys in your `.env.local` file:
+
+    ```env .env.local
+    AUTH0_DPOP_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----
+    MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE...
+    -----END PUBLIC KEY-----"
+
+    AUTH0_DPOP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----
+    MIGHAgEAMBMGByqGSM49AgEGCCqGSM49AwEHBG0wawIBAQ...
+    -----END PRIVATE KEY-----"
+    ```
+  </Step>
+
+  <Step title="Enable DPoP in Auth0Client">
+    Configure your Auth0 client to use DPoP:
+
+    ```typescript lib/auth0.ts
+    import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+    export const auth0 = new Auth0Client({
+      useDPoP: true
+      // Keys loaded automatically from environment variables
+    });
+    ```
+  </Step>
+</Steps>
+
+### Option 2: Dynamic Key Generation
+
+For dynamic key generation during application startup:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+import { generateKeyPair } from "oauth4webapi";
+
+// Generate ES256 key pair for DPoP
+const dpopKeyPair = await generateKeyPair("ES256");
+
+export const auth0 = new Auth0Client({
+  useDPoP: true,
+  dpopKeyPair
+});
+```
+
+<Warning>
+Dynamic key generation is suitable for development but not recommended for production. Use environment variables for consistent keys across application restarts.
+</Warning>
+
+### Option 3: Programmatic Configuration
+
+For advanced configurations with custom options:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+import { generateKeyPair } from "oauth4webapi";
+
+const dpopKeyPair = await generateKeyPair("ES256");
+
+export const auth0 = new Auth0Client({
+  useDPoP: true,
+  dpopKeyPair,
+  dpopOptions: {
+    clockTolerance: 30,  // Allow 30s clock difference
+    retry: {
+      delay: 100,        // 100ms retry delay
+      jitter: true       // Add randomness
+    }
+  }
+});
+```
+
+## Making DPoP-Protected Requests
+
+The recommended approach is to use the `createFetcher` method, which handles all DPoP complexity automatically.
+
+### DPoP Inheritance Behavior
+
+Fetchers created with `createFetcher` automatically inherit the global DPoP configuration from your `Auth0Client` instance:
+
+```typescript
+// lib/auth0.ts - Global DPoP configuration
+export const auth0 = new Auth0Client({
+  useDPoP: true, // Enable DPoP globally
+  dpopKeyPair
+});
+
+// Fetchers inherit DPoP settings automatically
+const fetcher = await auth0.createFetcher(req, {
+  baseUrl: "https://api.example.com"
+  // No need to specify useDPoP: true - inherited from global config
+});
+```
+
+<Info>
+This inheritance pattern aligns with auth0-spa-js behavior, providing consistent developer experience across Auth0 SDKs.
+</Info>
+
+### Using the Fetcher
+
+#### App Router (Server Components and Route Handlers)
+
+```typescript app/api/data/route.ts
+import { auth0 } from "@/lib/auth0";
+
+export async function GET() {
+  // Create fetcher - DPoP inherited from global Auth0Client configuration
+  const fetcher = await auth0.createFetcher(undefined, {
+    baseUrl: "https://api.example.com"
+  });
+
+  // Make authenticated request - DPoP proof generated automatically
+  const response = await fetcher.fetchWithAuth("/protected-resource", {
+    method: "GET",
+    headers: {
+      "Content-Type": "application/json"
+    }
+  });
+
+  const data = await response.json();
+  return Response.json(data);
+}
+```
+
+#### Pages Router (API Routes)
+
+```typescript pages/api/data.ts
+import { auth0 } from "@/lib/auth0";
+import type { NextApiRequest, NextApiResponse } from "next";
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const fetcher = await auth0.createFetcher(req, {
+    baseUrl: "https://api.example.com"
+  });
+
+  try {
+    const response = await fetcher.fetchWithAuth("/protected-data");
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch data" });
+  }
+}
+```
+
+### Per-Fetcher Override
+
+You can override the global DPoP setting for specific fetchers:
+
+```typescript
+// Explicitly disable DPoP for legacy API
+const legacyFetcher = await auth0.createFetcher(req, {
+  baseUrl: "https://legacy-api.example.com",
+  useDPoP: false // Override global setting
+});
+
+// Explicitly enable DPoP (when global setting is false)
+const secureFetcher = await auth0.createFetcher(req, {
+  baseUrl: "https://secure-api.example.com",
+  useDPoP: true // Override global setting
+});
+```
+
+## Configuration Options
+
+Fine-tune DPoP behavior for your environment and security requirements.
+
+### Clock Tolerance and Skew
+
+Configure timing validation to handle clock differences between client and server:
+
+```typescript lib/auth0.ts
+export const auth0 = new Auth0Client({
+  useDPoP: true,
+  dpopOptions: {
+    // Clock tolerance: Allow up to 60 seconds difference
+    clockTolerance: 60,
+
+    // Clock skew: Adjust if your server clock is consistently ahead/behind
+    clockSkew: 0,
+
+    // Retry configuration: Control DPoP nonce error behavior
+    retry: {
+      delay: 200,    // Wait 200ms before retry
+      jitter: true   // Add randomness to prevent thundering herd
+    }
+  }
+});
+```
+
+### Environment Variable Configuration
+
+Configure DPoP settings through environment variables:
+
+```env .env.local
+# === Required: DPoP Keys ===
+AUTH0_DPOP_PUBLIC_KEY="-----BEGIN PUBLIC KEY-----..."
+AUTH0_DPOP_PRIVATE_KEY="-----BEGIN PRIVATE KEY-----..."
+
+# === Optional: Timing Configuration ===
+AUTH0_DPOP_CLOCK_SKEW=0           # Default: 0 (no adjustment)
+AUTH0_DPOP_CLOCK_TOLERANCE=30     # Default: 30 seconds
+
+# === Optional: Retry Configuration ===
+AUTH0_RETRY_DELAY=100             # Default: 100ms delay
+AUTH0_RETRY_JITTER=true           # Default: true
+```
+
+## Error Handling
+
+Handle DPoP-specific errors gracefully with proper error detection.
+
+### Handling DPoP Errors
+
+```typescript app/api/data/route.ts
+import { DPoPError, DPoPErrorCode } from "@auth0/nextjs-auth0/errors";
+import { auth0 } from "@/lib/auth0";
+
+try {
+  const fetcher = await auth0.createFetcher(req, {
+    baseUrl: "https://api.example.com",
+    useDPoP: true
+  });
+
+  const response = await fetcher.fetchWithAuth("/protected-resource");
+  const data = await response.json();
+
+  return Response.json(data);
+} catch (error) {
+  // Check for DPoP-specific errors
+  if (error instanceof DPoPError) {
+    console.error(`DPoP Error [${error.code}]:`, error.message);
+
+    switch (error.code) {
+      case DPoPErrorCode.DPOP_KEY_EXPORT_FAILED:
+        return Response.json(
+          { error: "DPoP key configuration error" },
+          { status: 500 }
+        );
+
+      case DPoPErrorCode.DPOP_JKT_CALCULATION_FAILED:
+        return Response.json(
+          { error: "DPoP thumbprint calculation failed" },
+          { status: 500 }
+        );
+
+      default:
+        return Response.json(
+          { error: "DPoP configuration error" },
+          { status: 500 }
+        );
+    }
+  }
+
+  return Response.json({ error: "Request failed" }, { status: 500 });
+}
+```
+
+### Automatic Nonce Error Retry
+
+The SDK automatically handles DPoP nonce errors with intelligent retry logic:
+
+```typescript
+// The fetcher automatically retries DPoP nonce errors - no manual handling needed
+const response = await fetcher.fetchWithAuth("/api/endpoint");
+
+// Retry flow (handled internally):
+// 1. First request → DPoP nonce error (401 with use_dpop_nonce header)
+// 2. SDK extracts new nonce from error response
+// 3. SDK waits configured delay (with optional jitter)
+// 4. SDK retries request with updated nonce
+// 5. Success or final failure
+```
+
+## Advanced Usage
+
+### Custom Access Token Factory
+
+Override the default token retrieval with custom logic:
+
+```typescript
+const fetcher = await auth0.createFetcher(req, {
+  baseUrl: "https://api.example.com",
+  useDPoP: true,
+  getAccessToken: async (options) => {
+    // Custom logic: token caching, audience-specific tokens, etc.
+    const accessToken = await auth0.getAccessToken(req, {
+      ...options,
+      audience: "https://special-api.example.com",
+      scope: "admin:read admin:write"
+    });
+    return accessToken.token;
+  }
+});
+```
+
+### Custom Access Token Scopes
+
+Pass token options directly to individual requests:
+
+```typescript
+const response = await fetcher.fetchWithAuth("/protected-resource", {
+  scope: "read:admin write:admin",
+  audience: "https://api.example.com",
+  refresh: true // Force token refresh if needed
+});
+```
+
+### Conditional DPoP Usage
+
+Enable DPoP selectively based on environment or security requirements:
+
+```typescript
+const shouldUseDPoP =
+  process.env.NODE_ENV === "production" ||
+  request.url.includes("/sensitive-api");
+
+const fetcher = await auth0.createFetcher(req, {
+  baseUrl: "https://api.example.com",
+  useDPoP: shouldUseDPoP
+});
+```
+
+### Custom Fetch Implementation
+
+Add logging, metrics, or custom headers while preserving DPoP functionality:
+
+```typescript
+const fetcher = await auth0.createFetcher(req, {
+  baseUrl: "https://api.example.com",
+  useDPoP: true,
+  fetch: async (request) => {
+    console.log(`DPoP request to: ${request.url}`);
+
+    const startTime = Date.now();
+    const response = await fetch(request);
+    const duration = Date.now() - startTime;
+
+    console.log(`Response: ${response.status} (${duration}ms)`);
+
+    return response;
+  }
+});
+```
+
+## Token Audience Validation
+
+When using DPoP with multiple audiences (e.g., via MRRT policies), ensure each access token is sent only to its intended API.
+
+### How Mismatches Happen
+
+```javascript
+// Fetcher for API 1
+const fetcher1 = createFetcher({
+  url: "https://api1.example.com",
+  accessTokenFactory: () =>
+    getAccessToken({ audience: "https://api1.example.com" })
+});
+
+// Fetcher for API 2
+const fetcher2 = createFetcher({
+  url: "https://api2.example.com",
+  accessTokenFactory: () =>
+    getAccessToken({ audience: "https://api2.example.com" })
+});
+```
+
+**Common mistake**: Using `fetcher1` to call endpoints that should use `fetcher2`. The API will reject with:
+
+```
+OAUTH_JWT_CLAIM_COMPARISON_FAILED: unexpected JWT "aud" (audience) claim value
+```
+
+### Mitigation Strategies
+
+1. **Scope fetcher instances appropriately**
+   - Create one fetcher per API/audience combination
+   - Use clear, descriptive variable names
+   - Consider namespacing or module organization
+
+2. **Configure MRRT policies correctly**
+   - Ensure policies include all required audiences
+   - Set `skip_consent_for_verifiable_first_party_clients: true`
+   - Only include custom scopes (OIDC scopes are automatic)
+
+3. **Validate in development**
+   - Log the `aud` claim from decoded tokens
+   - Implement clear error handling for audience mismatches
+   - Test each fetcher against its intended API
+
+4. **API server validation**
+   - Validate the `aud` claim matches expected audience
+   - Use consistent audience strings
+
+### Example: Proper Token Routing
+
+```javascript
+// ✅ Correct: Each fetcher calls its own API
+await fetcher1.fetchWithAuth("/users");
+await fetcher2.fetchWithAuth("/orders");
+
+// ❌ Incorrect: Wrong fetcher for the API
+await fetcher1.fetchWithAuth("https://api2.example.com/orders"); // Will fail
+```
+
+## Security Best Practices
+
+Follow these guidelines for secure DPoP implementation:
+
+- **Key Management**: Use hardware security modules (HSMs) for key storage in production
+- **Key Rotation**: Implement regular key rotation policies for long-lived applications
+- **Monitoring**: Monitor DPoP error rates to detect potential attacks or configuration issues
+- **Clock Tolerance**: Keep clock tolerance as low as possible (≤ 30 seconds recommended)
+- **Environment Isolation**: Use unique key pairs per environment (dev, staging, production)
+- **Key Security**: Never commit DPoP keys to version control or logs
+
+<Warning>
+DPoP keys provide security for your access tokens. Treat them with the same level of security as client secrets.
+</Warning>
+
+## Troubleshooting
+
+### Common Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| `DPOP_KEY_EXPORT_FAILED` | Invalid key format | Verify key format is PEM-encoded |
+| `DPOP_JKT_CALCULATION_FAILED` | Key corruption | Regenerate key pair |
+| DPoP nonce errors persist | Network/timing issues | Increase retry delay or check network |
+| Clock validation failures | Server time drift | Adjust `clockTolerance` setting |
+
+### Debug Logging
+
+Enable debug logging to troubleshoot DPoP issues:
+
+```typescript
+const fetcher = await auth0.createFetcher(req, {
+  baseUrl: "https://api.example.com",
+  useDPoP: true,
+  fetch: async (request) => {
+    console.log("DPoP Request:", {
+      url: request.url,
+      method: request.method,
+      headers: Object.fromEntries(request.headers)
+    });
+
+    const response = await fetch(request);
+
+    console.log("DPoP Response:", {
+      status: response.status,
+      headers: Object.fromEntries(response.headers)
+    });
+
+    return response;
+  }
+});
+```

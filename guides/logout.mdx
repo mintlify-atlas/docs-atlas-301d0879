@@ -1,0 +1,355 @@
+---
+title: Logout
+description: Learn how to log users out of your Next.js application and Auth0.
+---
+
+Log users out of your application by redirecting them to the `/auth/logout` route. The SDK supports multiple logout strategies and configuration options.
+
+## Basic Logout
+
+The simplest way to log users out is to redirect them to the logout route:
+
+```tsx
+export default function LogoutButton() {
+  return (
+    <a href="/auth/logout">Log out</a>
+  );
+}
+```
+
+<Warning>
+  Use `<a>` tags instead of Next.js `<Link>` components for logout links to ensure the routing is handled server-side, not client-side.
+</Warning>
+
+When users visit `/auth/logout`, the SDK will:
+1. Clear the local session cookie
+2. Redirect to Auth0's logout endpoint
+3. Return to your application (or a specified URL)
+
+## Logout Strategies
+
+The SDK supports three logout strategies that control which Auth0 logout endpoint is used.
+
+### Auto Strategy (Default)
+
+The `auto` strategy uses OIDC logout when available, falling back to Auth0's `/v2/logout` endpoint:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  logoutStrategy: "auto" // Default behavior
+});
+```
+
+**How it works:**
+- If Auth0 supports OIDC logout (`end_session_endpoint` is available), uses OIDC
+- Otherwise, falls back to `/v2/logout`
+- Recommended for most applications
+
+### OIDC Strategy
+
+Always use OIDC RP-Initiated Logout:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  logoutStrategy: "oidc"
+});
+```
+
+**Use when:**
+- You want to enforce OIDC logout
+- Your Auth0 tenant supports OIDC logout
+- You need strict compliance with OIDC standards
+
+<Note>
+  This strategy will return an error if OIDC logout is not supported by your authorization server.
+</Note>
+
+### V2 Strategy
+
+Always use Auth0's `/v2/logout` endpoint:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  logoutStrategy: "v2"
+});
+```
+
+**Use when:**
+- You need wildcard URL support in logout redirects
+- Supporting multiple languages or environments with dynamic URLs
+- Migrated from v3 and need existing logout URL patterns
+- Have complex logout URL requirements incompatible with OIDC
+
+**Example with wildcards:**
+```html
+<!-- Wildcard URLs work with v2 strategy -->
+<a href="/auth/logout?returnTo=https://localhost:3000/*/about">Log out</a>
+<a href="/auth/logout?returnTo=https://localhost:3000/en/dashboard">Log out</a>
+```
+
+<Warning>
+  When using the `v2` strategy, ensure your logout URLs are registered in your Auth0 application's **Allowed Logout URLs** settings. The v2 endpoint supports wildcards.
+</Warning>
+
+## Return URL After Logout
+
+Redirect users to a specific URL after logout using the `returnTo` parameter.
+
+### Basic Return URL
+
+```tsx
+export default function LogoutButton() {
+  return (
+    <a href="/auth/logout?returnTo=https://example.com/goodbye">
+      Log out
+    </a>
+  );
+}
+```
+
+### Relative URLs
+
+Use relative URLs to redirect within your application:
+
+```tsx
+export default function LogoutButton() {
+  return (
+    <a href="/auth/logout?returnTo=/">
+      Log out
+    </a>
+  );
+}
+```
+
+### Dynamic Return URLs
+
+Build dynamic logout URLs based on the current page:
+
+```tsx
+"use client";
+
+import { usePathname } from "next/navigation";
+
+export default function LogoutButton() {
+  const pathname = usePathname();
+  const returnUrl = `/goodbye?from=${encodeURIComponent(pathname)}`;
+
+  return (
+    <a href={`/auth/logout?returnTo=${encodeURIComponent(returnUrl)}`}>
+      Log out
+    </a>
+  );
+}
+```
+
+<Warning>
+  All `returnTo` URLs must be registered in your Auth0 Application's **Allowed Logout URLs** in the [Auth0 Dashboard](https://manage.auth0.com).
+</Warning>
+
+## Federated Logout
+
+Log users out from both Auth0 and their identity provider (e.g., Google, Facebook, SAML).
+
+### Enable Federated Logout
+
+Add the `federated` parameter to the logout URL:
+
+```tsx
+export default function FederatedLogoutButton() {
+  return (
+    <a href="/auth/logout?federated">
+      Log out from IdP
+    </a>
+  );
+}
+```
+
+### With Return URL
+
+Combine federated logout with a return URL:
+
+```tsx
+export default function FederatedLogoutButton() {
+  return (
+    <a href="/auth/logout?federated&returnTo=https://example.com/goodbye">
+      Log out from IdP
+    </a>
+  );
+}
+```
+
+**How it works:**
+- The `federated` parameter works with all logout strategies (`auto`, `oidc`, `v2`)
+- For OIDC logout: `https://your-domain.auth0.com/oidc/logout?federated&...`
+- For V2 logout: `https://your-domain.auth0.com/v2/logout?federated&...`
+
+<Note>
+  Federated logout requires the identity provider to support logout. Not all providers support this feature.
+</Note>
+
+## OIDC Logout Privacy Configuration
+
+Control whether the `id_token_hint` parameter is included in OIDC logout URLs.
+
+### Default Behavior (Recommended)
+
+By default, the SDK includes `id_token_hint` for enhanced security:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  logoutStrategy: "auto", // or "oidc"
+  includeIdTokenHintInOIDCLogoutUrl: true // Default value
+});
+```
+
+### Privacy-Focused Configuration
+
+Exclude `id_token_hint` from logout URLs to prevent PII from appearing in logs:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  logoutStrategy: "auto", // or "oidc"
+  includeIdTokenHintInOIDCLogoutUrl: false // Exclude for privacy
+});
+```
+
+**When excluded:**
+- The SDK still sends `logout_hint` and `client_id` parameters
+- Reduces security against DoS attacks (per OIDC spec)
+- Useful when PII in server logs is unacceptable
+
+<Warning>
+  When `includeIdTokenHintInOIDCLogoutUrl: false`, logout requests lose cryptographic verification. The [OIDC specification](https://openid.net/specs/openid-connect-rpinitiated-1_0.html#Security) warns that "logout requests without a valid `id_token_hint` value are a potential means of denial of service." Use this setting only when privacy requirements outweigh DoS protection concerns.
+</Warning>
+
+<Note>
+  This flag only affects the `oidc` or `auto` (uses `oidc` when possible) logout strategy. It has no effect with the `v2` strategy.
+</Note>
+
+## Logout Flow Examples
+
+<Tabs>
+  <Tab title="App Router">
+    Create a logout button in a Server Component:
+
+    ```tsx app/components/logout-button.tsx
+    export default function LogoutButton() {
+      return (
+        <form action="/auth/logout" method="get">
+          <button type="submit">
+            Log out
+          </button>
+        </form>
+      );
+    }
+    ```
+
+    Or use a simple link:
+
+    ```tsx app/components/nav.tsx
+    import { auth0 } from "@/lib/auth0";
+
+    export default async function Nav() {
+      const session = await auth0.getSession();
+
+      return (
+        <nav>
+          {session ? (
+            <a href="/auth/logout">Log out</a>
+          ) : (
+            <a href="/auth/login">Log in</a>
+          )}
+        </nav>
+      );
+    }
+    ```
+  </Tab>
+
+  <Tab title="Pages Router">
+    Create a logout button in a page:
+
+    ```tsx pages/index.tsx
+    import { auth0 } from "@/lib/auth0";
+    import type { GetServerSideProps, InferGetServerSidePropsType } from "next";
+
+    export default function Home({
+      user
+    }: InferGetServerSidePropsType<typeof getServerSideProps>) {
+      return (
+        <div>
+          {user ? (
+            <div>
+              <p>Welcome, {user.name}!</p>
+              <a href="/auth/logout">Log out</a>
+            </div>
+          ) : (
+            <a href="/auth/login">Log in</a>
+          )}
+        </div>
+      );
+    }
+
+    export const getServerSideProps: GetServerSideProps = async ({ req }) => {
+      const session = await auth0.getSession(req);
+      return {
+        props: {
+          user: session?.user || null
+        }
+      };
+    };
+    ```
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<Note>
+  - **Always use server-side navigation** for logout (use `<a>` tags, not `<Link>`)
+  - **Register all return URLs** in Auth0 Dashboard Allowed Logout URLs
+  - **Use relative URLs** when possible to avoid hardcoding domains
+  - **Choose the appropriate strategy** based on your requirements:
+    - `auto` for most applications
+    - `v2` for wildcard URL support
+    - `oidc` for strict OIDC compliance
+  - **Use federated logout** only when users expect to be logged out of the IdP
+</Note>
+
+## Troubleshooting
+
+### Logout redirect not working
+
+If users aren't redirected after logout:
+
+1. **Check Allowed Logout URLs**: Ensure the return URL is registered in your Auth0 Application settings
+2. **Verify URL encoding**: Use `encodeURIComponent()` for dynamic URLs
+3. **Check logout strategy**: Ensure your strategy is compatible with your URL patterns
+
+### Wildcard URLs not working
+
+If wildcard URLs aren't working:
+- Switch to `logoutStrategy: "v2"` (OIDC doesn't support wildcards)
+- Register the wildcard pattern in Allowed Logout URLs
+
+### Users still logged into IdP
+
+If users remain logged into their identity provider:
+- Add the `federated` parameter to the logout URL
+- Verify the IdP supports federated logout
+- Check that federated logout is enabled in your Auth0 configuration
+
+### Privacy concerns with id_token_hint
+
+If you're concerned about PII in logout URLs:
+- Set `includeIdTokenHintInOIDCLogoutUrl: false`
+- Understand the security trade-offs (reduced DoS protection)
+- Only use this option when privacy is a critical requirement

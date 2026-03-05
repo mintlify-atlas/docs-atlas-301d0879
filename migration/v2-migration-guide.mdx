@@ -1,0 +1,369 @@
+---
+title: "V2 Migration Guide"
+description: "Guide to migrating from v1 to v2 of the Auth0 Next.js SDK"
+---
+
+This guide will help you migrate from `1.x` to `2.x` of the Auth0 Next.js SDK.
+
+## Node 10 No Longer Supported
+
+<Warning>
+Node 12 LTS and newer LTS releases are supported. Node 10 is no longer supported.
+</Warning>
+
+## `getSession` Now Returns a Promise
+
+<Warning>
+`getSession` is now asynchronous and returns a `Promise`.
+</Warning>
+
+<Tabs>
+  <Tab title="Before (v1)">
+    ```js
+    // /pages/api/my-api
+    import { getSession } from "@auth0/nextjs-auth0"
+
+    function myApiRoute(req, res) {
+      const session = getSession(req, res)
+      // ...
+    }
+    ```
+  </Tab>
+  <Tab title="After (v2)">
+    ```js
+    // /pages/api/my-api
+    import { getSession } from "@auth0/nextjs-auth0"
+
+    async function myApiRoute(req, res) {
+      const session = await getSession(req, res)
+      // ...
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Client Methods and Components Now Exported Under `/client`
+
+<Warning>
+All methods and components for the browser should now be accessed under `/client`.
+</Warning>
+
+<Tabs>
+  <Tab title="Before (v1)">
+    ```js
+    // pages/_app.js
+    import React from "react"
+    import { UserProvider } from "@auth0/nextjs-auth0"
+
+    export default function App({ Component, pageProps }) {
+      return (
+        <UserProvider>
+          <Component {...pageProps} />
+        </UserProvider>
+      )
+    }
+    ```
+
+    ```js
+    // pages/index.js
+    import { useUser } from "@auth0/nextjs-auth0"
+
+    export default function Index() {
+      const { user, error, isLoading } = useUser()
+
+      if (isLoading) return <div>Loading...</div>
+      if (error) return <div>{error.message}</div>
+
+      if (user) {
+        return (
+          <div>
+            Welcome {user.name}! <a href="/api/auth/logout">Logout</a>
+          </div>
+        )
+      }
+
+      return <a href="/api/auth/login">Login</a>
+    }
+    ```
+  </Tab>
+  <Tab title="After (v2)">
+    ```js
+    // pages/_app.js
+    import React from "react"
+    import { UserProvider } from "@auth0/nextjs-auth0/client"
+
+    export default function App({ Component, pageProps }) {
+      return (
+        <UserProvider>
+          <Component {...pageProps} />
+        </UserProvider>
+      )
+    }
+    ```
+
+    ```js
+    // pages/index.js
+
+    // The SSR version of withPageAuthRequired is still in the root export
+    import { withPageAuthRequired as withPageAuthRequiredSSR } from "@auth0/nextjs-auth0"
+    import {
+      useUser,
+      withPageAuthRequired as withPageAuthRequiredCSR,
+    } from "@auth0/nextjs-auth0/client"
+
+    export default withPageAuthRequiredCSR(function Index() {
+      const { user, error, isLoading } = useUser()
+
+      if (isLoading) return <div>Loading...</div>
+      if (error) return <div>{error.message}</div>
+
+      if (user) {
+        return (
+          <div>
+            Welcome {user.name}! <a href="/api/auth/logout">Logout</a>
+          </div>
+        )
+      }
+
+      return <a href="/api/auth/login">Login</a>
+    })
+
+    export const getServerSideProps = withPageAuthRequiredSSR()
+    ```
+  </Tab>
+</Tabs>
+
+## `updateSession` Has Been Added
+
+<Warning>
+Session modifications are no longer saved implicitly. You must explicitly call `updateSession` to persist changes.
+</Warning>
+
+<Tabs>
+  <Tab title="Before (v1)">
+    Previously your application could make modifications to the session during the lifecycle of the request and those updates would be saved implicitly when the response's headers were written:
+
+    ```js
+    // /pages/api/update-user
+    import { getSession } from "@auth0/nextjs-auth0"
+
+    function myApiRoute(req, res) {
+      const session = getSession(req, res)
+      session.foo = "bar"
+      res.json({ success: true })
+    }
+    // The updated session is serialized and the cookie is updated
+    // when the cookie headers are written to the response.
+    ```
+  </Tab>
+  <Tab title="After (v2)">
+    We've introduced a new `updateSession` method which must be explicitly invoked in order to update the session. This will immediately serialize the session, write it to the cookie and return a `Promise`.
+
+    ```js
+    // /pages/api/update-user
+    import { getSession, updateSession } from "@auth0/nextjs-auth0"
+
+    async function myApiRoute(req, res) {
+      const session = await getSession(req, res)
+      // The session is updated, serialized and the cookie is updated
+      // everytime you call `updateSession`.
+      await updateSession(req, res, {
+        ...session,
+        user: { ...session.user, foo: "bar" },
+      })
+      res.json({ success: true })
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## `getServerSidePropsWrapper` Has Been Removed
+
+<Warning>
+`getServerSidePropsWrapper` is no longer needed and has been removed.
+</Warning>
+
+Because the process of modifying the session is now explicit, you no longer have to wrap `getServerSideProps` in `getServerSidePropsWrapper`.
+
+<Tabs>
+  <Tab title="Before (v1)">
+    ```js
+    export const getServerSideProps = getServerSidePropsWrapper((ctx) => {
+      const session = getSession(ctx.req, ctx.res)
+      if (session) {
+        // User is authenticated
+      } else {
+        // User is not authenticated
+      }
+    })
+    ```
+  </Tab>
+  <Tab title="After (v2)">
+    ```js
+    export const getServerSideProps = async (ctx) => {
+      const session = await getSession(ctx.req, ctx.res)
+      if (session) {
+        // User is authenticated
+      } else {
+        // User is not authenticated
+      }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+## Profile API Route No Longer Returns a 401
+
+<Warning>
+The profile API route now returns a 204 status code when the user is not authenticated instead of 401.
+</Warning>
+
+Previously the profile API route, by default at `/api/auth/me`, would return a 401 error when the user was not authenticated. While it was technically the right status code for the situation, it showed up in the browser console as an error. This API route will now return a 204 instead. Since 204 is a successful status code, it will not produce a console error.
+
+## Override Default Error Handler
+
+You can now set the default error handler for the auth routes in a single place.
+
+<Tabs>
+  <Tab title="Before (v1)">
+    ```js
+    export default handleAuth({
+      async login(req, res) {
+        try {
+          await handleLogin(req, res)
+        } catch (error) {
+          errorLogger(error)
+          res.status(error.status || 500).end()
+        }
+      },
+      async callback(req, res) {
+        try {
+          await handleLogin(req, res)
+        } catch (error) {
+          errorLogger(error)
+          res.status(error.status || 500).end()
+        }
+      },
+      // ...
+    })
+    ```
+  </Tab>
+  <Tab title="After (v2)">
+    ```js
+    export default handleAuth({
+      onError(req, res, error) {
+        errorLogger(error)
+        // You can finish the response yourself if you want to customize
+        // the status code or redirect the user
+        // res.writeHead(302, {
+        //     Location: '/custom-error-page'
+        // });
+        // res.end();
+      },
+    })
+    ```
+  </Tab>
+</Tabs>
+
+## `afterCallback` Can Write to the Response
+
+You can now write your own redirect header or terminate the request in `afterCallback`.
+
+<Tabs>
+  <Tab title="Before (v1)">
+    ```js
+    const afterCallback = (req, res, session, state) => {
+      if (session.user.isAdmin) {
+        return session;
+      } else {
+        res.status(401).end('User is not admin');
+      }
+    }; // 💥 Fails with ERR_HTTP_HEADERS_SENT
+
+    const afterCallback = (req, res, session, state) => {
+      if (!session.user.isAdmin) {
+        res.setHeader('Location', '/admin');
+      }
+      return session;
+    }; // 💥 Fails with ERR_HTTP_HEADERS_SENT
+    ```
+  </Tab>
+  <Tab title="After (v2)">
+    ```js
+    const afterCallback = (req, res, session, state) => {
+      if (session.user.isAdmin) {
+        return session;
+      } else {
+        res.status(401).end('User is not admin');
+      }
+    }; // Terminates the request with 401 if user is not admin
+
+    const afterCallback = (req, res, session, state) => {
+      if (!session.user.isAdmin) {
+        res.setHeader('Location', '/admin');
+      }
+      return session;
+    }; // Redirects to `/admin` if user is admin
+    ```
+  </Tab>
+</Tabs>
+
+## Configure Default Handlers
+
+Previously it was not possible to configure the default handlers. For example, to pass a `connection` parameter to the login handler, you had to override it.
+
+<Tabs>
+  <Tab title="Before (v1)">
+    ```js
+    export default handleAuth({
+      login: async (req, res) => {
+        try {
+          await handleLogin(req, res, {
+            authorizationParams: { connection: "github" },
+          })
+        } catch (error) {
+          // ...
+        }
+      },
+    })
+    ```
+  </Tab>
+  <Tab title="After (v2)">
+    Now you can configure a default handler by passing an options object to it:
+
+    ```js
+    export default handleAuth({
+      login: handleLogin({
+        authorizationParams: { connection: "github" },
+      }),
+    })
+    ```
+
+    You can also pass a function that receives the request and returns an options object:
+
+    ```js
+    export default handleAuth({
+      login: handleLogin((req) => {
+        return {
+          authorizationParams: { connection: "github" },
+        }
+      }),
+    })
+    ```
+
+    You can even create new handlers by configuring the default ones:
+
+    ```js
+    export default handleAuth({
+      // Creates /api/auth/signup
+      signup: handleLogin({
+        authorizationParams: { screen_hint: "signup" },
+      }),
+    })
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+It is still possible to override the default handlers if needed.
+</Note>

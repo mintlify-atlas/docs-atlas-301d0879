@@ -1,0 +1,605 @@
+---
+title: MFA Errors
+description: Multi-factor authentication related errors in the Auth0 Next.js SDK
+---
+
+## Overview
+
+MFA (Multi-Factor Authentication) errors are thrown during MFA enrollment, challenge, and verification operations. All MFA error classes extend from [`SdkError`](/api/errors/sdk-error) and follow the Auth0 API error format with `error` and `error_description` properties.
+
+<Info>
+  MFA errors support both direct SDK consumption and HTTP API route usage via automatic `toJSON()` serialization.
+</Info>
+
+## Error Response Format
+
+All MFA errors follow the Auth0 MFA API error response format:
+
+```typescript
+interface MfaApiErrorResponse {
+  error: string;
+  error_description: string;
+  message?: string;
+}
+```
+
+## InvalidRequestError
+
+Thrown when MFA request validation fails due to missing or invalid parameters.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"invalid_request"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Description of the validation failure.
+</ResponseField>
+
+### When Thrown
+
+- Missing required parameters (`mfaToken`, `otp`, `authenticatorId`, etc.)
+- Invalid parameter formats or values
+- Parameter type mismatches
+
+### Example
+
+```typescript
+import { mfa } from '@auth0/nextjs-auth0/server';
+
+try {
+  await mfa.verify({
+    mfaToken: '', // Empty token
+    otp: '123456'
+  });
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'invalid_request') {
+      return Response.json(error, { status: 400 });
+    }
+  }
+}
+```
+
+## MfaGetAuthenticatorsError
+
+Thrown when listing MFA authenticators fails.
+
+### Properties
+
+<ResponseField name="error" type="string" required>
+  Auth0 error code (e.g., `"invalid_token"`, `"expired_token"`).
+</ResponseField>
+
+<ResponseField name="error_description" type="string" required>
+  Human-readable error description from Auth0.
+</ResponseField>
+
+<ResponseField name="code" type="string" required>
+  Same as `error` property. Use this for programmatic error handling.
+</ResponseField>
+
+<ResponseField name="cause" type="MfaApiErrorResponse | undefined">
+  The original Auth0 API error response.
+</ResponseField>
+
+### When Thrown
+
+- Invalid or expired MFA token
+- MFA token doesn't belong to the current session
+- Network errors communicating with Auth0
+
+### Example
+
+```typescript
+import { mfa, MfaGetAuthenticatorsError } from '@auth0/nextjs-auth0/server';
+
+export async function GET(request: Request) {
+  const { searchParams } = new URL(request.url);
+  const mfaToken = searchParams.get('mfaToken');
+
+  try {
+    const authenticators = await mfa.getAuthenticators({ mfaToken });
+    return Response.json(authenticators);
+  } catch (error) {
+    if (error instanceof MfaGetAuthenticatorsError) {
+      console.error('Error code:', error.code);
+      console.error('Description:', error.error_description);
+      
+      if (error.cause) {
+        console.error('Original error:', error.cause);
+      }
+      
+      return Response.json(error, { status: 400 });
+    }
+    throw error;
+  }
+}
+```
+
+## MfaChallengeError
+
+Thrown when initiating an MFA challenge fails.
+
+### Properties
+
+<ResponseField name="error" type="string" required>
+  Auth0 error code (e.g., `"invalid_authenticator_id"`, `"unsupported_challenge_type"`).
+</ResponseField>
+
+<ResponseField name="error_description" type="string" required>
+  Human-readable error description from Auth0.
+</ResponseField>
+
+<ResponseField name="code" type="string" required>
+  Same as `error` property. Use this for programmatic error handling.
+</ResponseField>
+
+<ResponseField name="cause" type="MfaApiErrorResponse | undefined">
+  The original Auth0 API error response.
+</ResponseField>
+
+### When Thrown
+
+- Invalid or expired MFA token
+- Authenticator ID not found or not active
+- Challenge type not supported for the authenticator
+- User doesn't own the authenticator
+
+### Example
+
+```typescript
+import { mfa, MfaChallengeError } from '@auth0/nextjs-auth0/server';
+
+export async function POST(request: Request) {
+  const { mfaToken, challengeType, authenticatorId } = await request.json();
+
+  try {
+    const challenge = await mfa.challenge({
+      mfaToken,
+      challengeType: 'oob',
+      authenticatorId: 'sms|dev_abc123'
+    });
+    return Response.json(challenge);
+  } catch (error) {
+    if (error instanceof MfaChallengeError) {
+      if (error.cause?.error === 'invalid_authenticator_id') {
+        console.error('Authenticator not found or not active');
+      }
+      return Response.json(error, { status: 400 });
+    }
+    throw error;
+  }
+}
+```
+
+## MfaVerifyError
+
+Thrown when MFA verification fails.
+
+### Properties
+
+<ResponseField name="error" type="string" required>
+  Auth0 error code (e.g., `"invalid_grant"`, `"invalid_otp"`).
+</ResponseField>
+
+<ResponseField name="error_description" type="string" required>
+  Human-readable error description from Auth0.
+</ResponseField>
+
+<ResponseField name="code" type="string" required>
+  Same as `error` property. Use this for programmatic error handling.
+</ResponseField>
+
+<ResponseField name="cause" type="MfaApiErrorResponse | undefined">
+  The original Auth0 API error response.
+</ResponseField>
+
+### When Thrown
+
+- Invalid or expired verification code
+- Wrong OTP entered
+- Too many verification attempts
+- Expired MFA token
+
+### Example
+
+```typescript
+import { mfa, MfaVerifyError } from '@auth0/nextjs-auth0/server';
+
+export async function POST(request: Request) {
+  const { mfaToken, otp } = await request.json();
+
+  try {
+    const result = await mfa.verify({
+      mfaToken,
+      otp: '123456'
+    });
+    return Response.json(result);
+  } catch (error) {
+    if (error instanceof MfaVerifyError) {
+      if (error.cause?.error === 'invalid_grant') {
+        console.error('Invalid or expired verification code');
+      }
+      return Response.json(error, { status: 400 });
+    }
+    throw error;
+  }
+}
+```
+
+## MfaNoAvailableFactorsError
+
+SDK-generated error thrown when no MFA factors are available for challenge. This error has no Auth0 API equivalent.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"mfa_no_available_factors"`
+</ResponseField>
+
+<ResponseField name="error" type="string" required>
+  Always `"mfa_no_available_factors"`
+</ResponseField>
+
+<ResponseField name="error_description" type="string" required>
+  Description of why no factors are available.
+</ResponseField>
+
+### When Thrown
+
+- User has no enrolled authenticators
+- All authenticators are inactive or unavailable
+- Challenge type requested has no matching authenticators
+
+### Example
+
+```typescript
+import { mfa, MfaNoAvailableFactorsError } from '@auth0/nextjs-auth0/server';
+
+try {
+  const authenticators = await mfa.getAuthenticators({ mfaToken });
+  
+  if (authenticators.length === 0) {
+    throw new MfaNoAvailableFactorsError(
+      'No MFA authenticators enrolled. Please enroll an authenticator first.'
+    );
+  }
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'mfa_no_available_factors') {
+      // Redirect to enrollment
+      redirect('/mfa/enroll');
+    }
+  }
+}
+```
+
+## MfaEnrollmentError
+
+Thrown when MFA enrollment fails.
+
+### Properties
+
+<ResponseField name="error" type="string" required>
+  Auth0 error code (e.g., `"unsupported_challenge_type"`, `"invalid_token"`).
+</ResponseField>
+
+<ResponseField name="error_description" type="string" required>
+  Human-readable error description from Auth0.
+</ResponseField>
+
+<ResponseField name="code" type="string" required>
+  Same as `error` property. Use this for programmatic error handling.
+</ResponseField>
+
+<ResponseField name="cause" type="MfaApiErrorResponse | undefined">
+  The original Auth0 API error response.
+</ResponseField>
+
+### When Thrown
+
+- Unsupported authenticator type for the tenant
+- Invalid MFA token
+- Enrollment already exists
+- Maximum authenticators reached
+
+### Example
+
+```typescript
+import { mfa, MfaEnrollmentError } from '@auth0/nextjs-auth0/server';
+
+export async function POST(request: Request) {
+  const { mfaToken, authenticatorTypes } = await request.json();
+
+  try {
+    const enrollment = await mfa.enroll({
+      mfaToken,
+      authenticatorTypes: ['otp']
+    });
+    return Response.json(enrollment);
+  } catch (error) {
+    if (error instanceof MfaEnrollmentError) {
+      if (error.cause?.error === 'unsupported_challenge_type') {
+        console.error('Tenant does not support OTP enrollment');
+      }
+      return Response.json(error, { status: 400 });
+    }
+    throw error;
+  }
+}
+```
+
+## MfaRequiredError
+
+Thrown when `getAccessToken()` requires MFA step-up authentication. This error is returned during token refresh when Auth0 indicates that MFA is required.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"mfa_required"`
+</ResponseField>
+
+<ResponseField name="error" type="string" required>
+  Always `"mfa_required"`
+</ResponseField>
+
+<ResponseField name="error_description" type="string" required>
+  Error description from Auth0.
+</ResponseField>
+
+<ResponseField name="mfa_token" type="string" required>
+  Encrypted MFA token to pass to MFA API methods. This token is encrypted using the SDK's cookie secret for security.
+</ResponseField>
+
+<ResponseField name="mfa_requirements" type="MfaRequirements | undefined">
+  MFA requirements indicating available challenge/enrollment methods.
+</ResponseField>
+
+<ResponseField name="cause" type="Error | undefined">
+  The underlying error that caused this MFA requirement.
+</ResponseField>
+
+### MfaRequirements Type
+
+```typescript
+interface MfaRequirements {
+  /** Required enrollment types (user needs to enroll new authenticator) */
+  enroll?: Array<{ type: string }>;
+  /** Available challenge types (existing authenticators) */
+  challenge?: Array<{ type: string }>;
+}
+```
+
+### When Thrown
+
+- Access token refresh requires MFA step-up
+- Tenant has MFA policies requiring additional authentication
+- High-risk actions require MFA verification
+
+### Example
+
+```typescript
+import { getAccessToken, MfaRequiredError } from '@auth0/nextjs-auth0/server';
+
+export async function GET(request: Request) {
+  try {
+    const { accessToken } = await getAccessToken({
+      audience: 'https://api.example.com'
+    });
+    
+    return Response.json({ accessToken });
+  } catch (error) {
+    if (error instanceof MfaRequiredError) {
+      // MFA step-up required
+      console.log('MFA token:', error.mfa_token);
+      console.log('Requirements:', error.mfa_requirements);
+      
+      // Redirect to MFA challenge page
+      redirect(`/mfa/challenge?token=${encodeURIComponent(error.mfa_token)}`);
+    }
+    throw error;
+  }
+}
+```
+
+### Complete MFA Step-Up Flow
+
+```typescript
+import { 
+  getAccessToken, 
+  mfa,
+  MfaRequiredError,
+  MfaVerifyError 
+} from '@auth0/nextjs-auth0/server';
+
+// Step 1: Attempt to get access token
+try {
+  const { accessToken } = await getAccessToken({
+    audience: 'https://api.example.com'
+  });
+  // Use accessToken...
+} catch (error) {
+  if (error instanceof MfaRequiredError) {
+    // Step 2: Store mfa_token and redirect to MFA page
+    const mfaToken = error.mfa_token;
+    redirect(`/mfa?token=${encodeURIComponent(mfaToken)}`);
+  }
+}
+
+// Step 3: On MFA page, get authenticators
+const authenticators = await mfa.getAuthenticators({ mfaToken });
+
+// Step 4: Challenge the authenticator
+await mfa.challenge({
+  mfaToken,
+  challengeType: 'oob',
+  authenticatorId: authenticators[0].id
+});
+
+// Step 5: Verify the OTP
+try {
+  await mfa.verify({
+    mfaToken,
+    otp: userEnteredCode
+  });
+  // MFA complete, redirect back to original request
+  redirect('/api/protected-resource');
+} catch (error) {
+  if (error instanceof MfaVerifyError) {
+    // Invalid code, let user retry
+    console.error('Invalid verification code');
+  }
+}
+```
+
+## MfaTokenExpiredError
+
+Thrown when MFA API methods are called but the encrypted `mfa_token` has expired or the session context no longer exists.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"mfa_token_expired"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  "MFA token has expired. Please restart the MFA flow."
+</ResponseField>
+
+### When Thrown
+
+- The session expired between catching `MfaRequiredError` and calling MFA methods
+- The MFA context was cleaned up due to TTL expiration
+- Too much time passed between MFA steps
+
+### Example
+
+```typescript
+import { mfa, MfaTokenExpiredError } from '@auth0/nextjs-auth0/server';
+
+try {
+  await mfa.verify({ mfaToken, otp: code });
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'mfa_token_expired') {
+      // Restart MFA flow - context was lost
+      redirect('/auth/login?prompt=mfa');
+    }
+  }
+}
+```
+
+## MfaTokenInvalidError
+
+Thrown when the encrypted `mfa_token` is invalid or tampered with.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"mfa_token_invalid"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  "MFA token is invalid."
+</ResponseField>
+
+### When Thrown
+
+- The token was tampered with
+- The token is malformed (not valid JWE)
+- The token was encrypted with a different secret
+- The token doesn't belong to the current session
+
+### Example
+
+```typescript
+import { mfa, MfaTokenInvalidError } from '@auth0/nextjs-auth0/server';
+
+try {
+  const authenticators = await mfa.getAuthenticators({ 
+    mfaToken: tamperedToken 
+  });
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'mfa_token_invalid') {
+      // Token is invalid or tampered
+      console.error('Invalid MFA token. Restart authentication.');
+      redirect('/auth/login');
+    }
+  }
+}
+```
+
+## Error Handling Best Practices
+
+### Catching Errors in API Routes
+
+MFA errors serialize automatically for HTTP responses:
+
+```typescript
+import { mfa } from '@auth0/nextjs-auth0/server';
+
+export async function POST(request: Request) {
+  try {
+    const { mfaToken, otp } = await request.json();
+    const result = await mfa.verify({ mfaToken, otp });
+    return Response.json(result);
+  } catch (error) {
+    // MFA errors automatically serialize to Auth0 API format
+    if (error && typeof error === 'object' && 'error' in error) {
+      return Response.json(error, { status: 400 });
+    }
+    return Response.json(
+      { error: 'internal_error', error_description: 'An unexpected error occurred' },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### Catching by Error Code
+
+```typescript
+try {
+  await mfa.verify({ mfaToken, otp });
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    switch (error.code) {
+      case 'invalid_request':
+        console.error('Validation error:', error.message);
+        break;
+      case 'mfa_token_expired':
+        redirect('/auth/login');
+        break;
+      case 'mfa_token_invalid':
+        redirect('/auth/login');
+        break;
+      default:
+        // Handle MFA API errors by checking error.error
+        if ('error' in error) {
+          console.error('MFA API error:', error.error);
+        }
+    }
+  }
+}
+```
+
+## Common MFA Error Codes from Auth0
+
+| Error Code | Description | Recovery Action |
+|------------|-------------|----------------|
+| `invalid_token` | MFA token is invalid or expired | Restart authentication flow |
+| `expired_token` | MFA token has expired | Restart authentication flow |
+| `invalid_grant` | Invalid verification code or OTP | Prompt user to re-enter code |
+| `invalid_authenticator_id` | Authenticator not found or inactive | Show list of available authenticators |
+| `unsupported_challenge_type` | Challenge type not supported | Use a different authenticator type |
+| `invalid_otp` | One-time password is incorrect | Allow user to retry |
+| `too_many_attempts` | Too many failed verification attempts | Implement rate limiting or cooldown |
+
+## Related
+
+- [SdkError](/api/errors/sdk-error) - Base error class
+- [OAuth Errors](/api/errors/oauth-errors) - OAuth 2.0 related errors
+- [Auth0 MFA API Documentation](https://auth0.com/docs/api/authentication#multi-factor-authentication)

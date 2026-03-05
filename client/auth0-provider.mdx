@@ -1,0 +1,368 @@
+---
+title: Auth0Provider
+description: Context provider for optimizing user data fetching with SWR
+---
+
+The `Auth0Provider` component wraps your application to provide optimized user data fetching and caching using SWR (Stale-While-Revalidate). It eliminates the initial loading state when using the `useUser` hook.
+
+## Import
+
+```typescript
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+```
+
+## Signature
+
+```tsx
+function Auth0Provider({
+  user,
+  children
+}: {
+  user?: User;
+  children: React.ReactNode;
+}): JSX.Element
+```
+
+## Props
+
+<ParamField path="user" type="User" optional>
+  Initial user data to populate the SWR cache. This should be the authenticated user object fetched from the server.
+  
+  When provided, components using `useUser()` will immediately have access to user data without an initial loading state.
+</ParamField>
+
+<ParamField path="children" type="React.ReactNode" required>
+  Your application components.
+</ParamField>
+
+## Basic Usage
+
+Wrap your application in the root layout:
+
+```tsx app/layout.tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import { auth0 } from '@/lib/auth0';
+
+export default async function RootLayout({
+  children
+}: {
+  children: React.ReactNode;
+}) {
+  const session = await auth0.getSession();
+
+  return (
+    <html lang="en">
+      <body>
+        <Auth0Provider user={session?.user}>
+          {children}
+        </Auth0Provider>
+      </body>
+    </html>
+  );
+}
+```
+
+Now all client components using `useUser()` will have immediate access to user data:
+
+```tsx app/profile/page.tsx
+"use client";
+
+import { useUser } from '@auth0/nextjs-auth0';
+
+export default function Profile() {
+  const { user } = useUser();
+  
+  // No loading state needed - user data is immediately available
+  return (
+    <div>
+      <h1>Welcome, {user?.name || 'Guest'}!</h1>
+    </div>
+  );
+}
+```
+
+## Without Auth0Provider
+
+Without `Auth0Provider`, the `useUser` hook will show a loading state on initial render:
+
+```tsx
+"use client";
+
+import { useUser } from '@auth0/nextjs-auth0';
+
+export default function Profile() {
+  const { user, isLoading } = useUser();
+  
+  // isLoading will be true on first render
+  if (isLoading) return <div>Loading...</div>;
+  
+  return <div>Welcome, {user?.name}!</div>;
+}
+```
+
+## With Auth0Provider
+
+With `Auth0Provider`, the user data is immediately available:
+
+```tsx app/layout.tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import { auth0 } from '@/lib/auth0';
+
+export default async function RootLayout({ children }) {
+  const session = await auth0.getSession();
+
+  return (
+    <html>
+      <body>
+        <Auth0Provider user={session?.user}>
+          {children}
+        </Auth0Provider>
+      </body>
+    </html>
+  );
+}
+```
+
+```tsx app/profile/page.tsx
+"use client";
+
+import { useUser } from '@auth0/nextjs-auth0';
+
+export default function Profile() {
+  const { user } = useUser();
+  
+  // No loading state - user data is immediately available
+  return <div>Welcome, {user?.name || 'Guest'}!</div>;
+}
+```
+
+## Pages Router
+
+For the Pages Router, wrap your `_app.tsx`:
+
+```tsx pages/_app.tsx
+import type { AppProps } from 'next/app';
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+
+function MyApp({ Component, pageProps }: AppProps) {
+  return (
+    <Auth0Provider user={pageProps.user}>
+      <Component {...pageProps} />
+    </Auth0Provider>
+  );
+}
+
+export default MyApp;
+```
+
+Then fetch the user in `getServerSideProps`:
+
+```tsx pages/index.tsx
+import { auth0 } from '@/lib/auth0';
+import type { GetServerSideProps } from 'next';
+
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const session = await auth0.getSession(ctx.req);
+  
+  return {
+    props: {
+      user: session?.user || null
+    }
+  };
+};
+
+export default function Home() {
+  return <div>Home Page</div>;
+}
+```
+
+## How It Works
+
+`Auth0Provider` uses SWR's `SWRConfig` to populate the cache with initial user data:
+
+```tsx
+import { SWRConfig } from 'swr';
+
+export function Auth0Provider({ user, children }) {
+  return (
+    <SWRConfig
+      value={{
+        fallback: {
+          [process.env.NEXT_PUBLIC_PROFILE_ROUTE || '/auth/profile']: user
+        }
+      }}
+    >
+      {children}
+    </SWRConfig>
+  );
+}
+```
+
+This pre-populates the SWR cache with user data, eliminating the initial fetch when components call `useUser()`.
+
+## Custom SWR Configuration
+
+You can combine `Auth0Provider` with custom SWR configuration:
+
+```tsx app/layout.tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import { SWRConfig } from 'swr';
+import { auth0 } from '@/lib/auth0';
+
+export default async function RootLayout({ children }) {
+  const session = await auth0.getSession();
+
+  return (
+    <html>
+      <body>
+        <SWRConfig
+          value={{
+            revalidateOnFocus: false,
+            revalidateOnReconnect: false,
+            refreshInterval: 0
+          }}
+        >
+          <Auth0Provider user={session?.user}>
+            {children}
+          </Auth0Provider>
+        </SWRConfig>
+      </body>
+    </html>
+  );
+}
+```
+
+## Nesting Providers
+
+`Auth0Provider` can be nested with other providers:
+
+```tsx app/layout.tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import { ThemeProvider } from '@/components/theme-provider';
+import { auth0 } from '@/lib/auth0';
+
+export default async function RootLayout({ children }) {
+  const session = await auth0.getSession();
+
+  return (
+    <html>
+      <body>
+        <ThemeProvider>
+          <Auth0Provider user={session?.user}>
+            {children}
+          </Auth0Provider>
+        </ThemeProvider>
+      </body>
+    </html>
+  );
+}
+```
+
+## Handling Unauthenticated Users
+
+When there's no authenticated user, pass `undefined` or omit the `user` prop:
+
+```tsx app/layout.tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import { auth0 } from '@/lib/auth0';
+
+export default async function RootLayout({ children }) {
+  const session = await auth0.getSession();
+
+  return (
+    <html>
+      <body>
+        <Auth0Provider user={session?.user}>
+          {children}
+        </Auth0Provider>
+      </body>
+    </html>
+  );
+}
+```
+
+Components using `useUser()` will correctly show `user` as `null`:
+
+```tsx
+"use client";
+
+import { useUser } from '@auth0/nextjs-auth0';
+
+export default function Navigation() {
+  const { user } = useUser();
+  
+  return (
+    <nav>
+      {user ? (
+        <a href="/auth/logout">Logout</a>
+      ) : (
+        <a href="/auth/login">Login</a>
+      )}
+    </nav>
+  );
+}
+```
+
+## Performance Benefits
+
+### Without Auth0Provider
+
+1. Client component renders
+2. `useUser()` initiates fetch to `/auth/profile`
+3. Component shows loading state
+4. Fetch completes
+5. Component re-renders with user data
+
+**Result**: Flash of loading state, extra network request
+
+### With Auth0Provider
+
+1. Server fetches user during SSR
+2. User data passed to `Auth0Provider`
+3. SWR cache pre-populated
+4. Client component renders
+5. `useUser()` returns cached data immediately
+
+**Result**: No loading state, no extra network request
+
+## TypeScript
+
+```tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import type { User } from '@auth0/nextjs-auth0';
+import { auth0 } from '@/lib/auth0';
+
+interface LayoutProps {
+  children: React.ReactNode;
+}
+
+export default async function RootLayout({ children }: LayoutProps) {
+  const session = await auth0.getSession();
+  const user: User | undefined = session?.user;
+
+  return (
+    <html>
+      <body>
+        <Auth0Provider user={user}>
+          {children}
+        </Auth0Provider>
+      </body>
+    </html>
+  );
+}
+```
+
+## Environment Variables
+
+The provider uses the same profile route as `useUser`:
+
+```bash .env.local
+# Default: /auth/profile
+NEXT_PUBLIC_PROFILE_ROUTE=/api/auth/profile
+```
+
+## See Also
+
+- [useUser](/client/use-user) - React hook for accessing user data
+- [getSession (Server)](/server/get-session) - Server-side user access
+- [SWR Documentation](https://swr.vercel.app/) - Learn more about SWR

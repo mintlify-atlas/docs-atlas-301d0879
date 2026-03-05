@@ -1,0 +1,486 @@
+---
+title: Customizing Auth Handlers
+description: Learn how to customize authentication handlers to add custom logic before and after authentication flows.
+---
+
+While authentication routes are handled automatically by the middleware, you can customize the authentication flow by intercepting auth routes or using hooks.
+
+## Customization Approaches
+
+There are two main ways to customize authentication handlers:
+
+1. **Run custom code before auth handlers** - Intercept auth routes in middleware
+2. **Run code after authentication** - Use the `onCallback` hook
+
+Additional customization options include:
+- Login parameters via query parameters or static configuration
+- Session data modification using the `beforeSessionSaved` hook
+- Logout redirects using query parameters
+
+<Warning>
+  When customizing auth handlers, always validate user inputs (especially redirect URLs) to prevent security vulnerabilities like open redirects. Use relative URLs when possible and implement proper input sanitization.
+</Warning>
+
+## Running Custom Code Before Auth Handlers
+
+Intercept authentication routes in your middleware to add custom logic before the SDK processes them.
+
+<Tabs>
+  <Tab title="Next.js 15 (middleware.ts)">
+    ```typescript middleware.ts
+    import type { NextRequest } from "next/server";
+    import { NextResponse } from "next/server";
+    import { auth0 } from "./lib/auth0";
+
+    export async function middleware(request: NextRequest) {
+      // Custom logic for login route
+      if (request.nextUrl.pathname === "/auth/login") {
+        // Example: Add custom query parameters
+        const url = request.nextUrl.clone();
+        url.searchParams.set("screen_hint", "signup");
+        url.searchParams.set("ui_locales", "es");
+
+        // Continue with modified request
+        return auth0.middleware(
+          new NextRequest(url, request)
+        );
+      }
+
+      // Custom logic for callback route
+      if (request.nextUrl.pathname === "/auth/callback") {
+        // Example: Log callback attempts
+        console.log("Auth callback initiated", {
+          timestamp: new Date().toISOString(),
+          ip: request.ip
+        });
+      }
+
+      // Default: Let SDK handle all auth routes
+      return auth0.middleware(request);
+    }
+
+    export const config = {
+      matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+    };
+    ```
+  </Tab>
+
+  <Tab title="Next.js 16 (proxy.ts)">
+    ```typescript proxy.ts
+    import { NextResponse } from "next/server";
+    import { auth0 } from "./lib/auth0";
+
+    export async function proxy(request: Request) {
+      const url = new URL(request.url);
+
+      // Custom logic for login route
+      if (url.pathname === "/auth/login") {
+        // Example: Add custom query parameters
+        url.searchParams.set("screen_hint", "signup");
+        url.searchParams.set("ui_locales", "es");
+
+        // Continue with modified request
+        return auth0.middleware(
+          new Request(url, request)
+        );
+      }
+
+      // Custom logic for callback route
+      if (url.pathname === "/auth/callback") {
+        // Example: Log callback attempts
+        console.log("Auth callback initiated", {
+          timestamp: new Date().toISOString()
+        });
+      }
+
+      // Default: Let SDK handle all auth routes
+      return auth0.middleware(request);
+    }
+
+    export const config = {
+      matcher: ["/((?!_next/static|_next/image|favicon.ico).*)"],
+    };
+    ```
+  </Tab>
+</Tabs>
+
+### Use Cases
+
+**1. Force specific authentication parameters:**
+
+```typescript
+if (request.nextUrl.pathname === "/auth/login") {
+  const url = request.nextUrl.clone();
+  url.searchParams.set("connection", "google-oauth2");
+  return auth0.middleware(new NextRequest(url, request));
+}
+```
+
+**2. Logging and analytics:**
+
+```typescript
+if (request.nextUrl.pathname.startsWith("/auth/")) {
+  console.log("Auth event:", {
+    route: request.nextUrl.pathname,
+    timestamp: Date.now(),
+    userAgent: request.headers.get("user-agent")
+  });
+}
+```
+
+**3. Rate limiting:**
+
+```typescript
+import { rateLimit } from "@/lib/rate-limit";
+
+if (request.nextUrl.pathname === "/auth/login") {
+  const identifier = request.ip || "anonymous";
+  const { success } = await rateLimit.check(identifier);
+
+  if (!success) {
+    return NextResponse.json(
+      { error: "Too many login attempts" },
+      { status: 429 }
+    );
+  }
+}
+```
+
+**4. Custom validation:**
+
+```typescript
+if (request.nextUrl.pathname === "/auth/login") {
+  const returnTo = request.nextUrl.searchParams.get("returnTo");
+
+  // Validate returnTo URL
+  if (returnTo && !isValidReturnUrl(returnTo)) {
+    return NextResponse.json(
+      { error: "Invalid return URL" },
+      { status: 400 }
+    );
+  }
+}
+
+function isValidReturnUrl(url: string): boolean {
+  // Only allow relative URLs or same-origin URLs
+  return url.startsWith("/") || url.startsWith(process.env.APP_BASE_URL!);
+}
+```
+
+## Running Code After Callback
+
+Use the `onCallback` hook to run custom logic after authentication succeeds.
+
+### Using the onCallback Hook
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  async onCallback(req, session, state) {
+    // Custom logic after successful authentication
+    console.log("User authenticated:", session.user.sub);
+
+    // Example: Store user in database
+    await db.users.upsert({
+      where: { id: session.user.sub },
+      create: {
+        id: session.user.sub,
+        email: session.user.email,
+        name: session.user.name
+      },
+      update: {
+        lastLogin: new Date()
+      }
+    });
+
+    // Return the session (or modified session)
+    return session;
+  }
+});
+```
+
+### Hook Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `req` | `NextRequest` \| `NextApiRequest` | The callback request object |
+| `session` | `SessionData` | The authenticated session data |
+| `state` | `{ returnTo?: string }` | State data from the auth transaction |
+
+### Common Use Cases
+
+**1. Create user record:**
+
+```typescript
+async onCallback(req, session, state) {
+  // Check if user exists, create if not
+  const user = await db.users.findUnique({
+    where: { authId: session.user.sub }
+  });
+
+  if (!user) {
+    await db.users.create({
+      data: {
+        authId: session.user.sub,
+        email: session.user.email,
+        name: session.user.name,
+        picture: session.user.picture
+      }
+    });
+  }
+
+  return session;
+}
+```
+
+**2. Custom redirect logic:**
+
+```typescript
+import { NextResponse } from "next/server";
+
+async onCallback(req, session, state) {
+  // Redirect new users to onboarding
+  const isNewUser = !await db.users.exists({
+    where: { authId: session.user.sub }
+  });
+
+  if (isNewUser) {
+    // Override default redirect
+    return {
+      session,
+      redirect: "/onboarding"
+    };
+  }
+
+  return session;
+}
+```
+
+**3. Enrich session with database data:**
+
+```typescript
+async onCallback(req, session, state) {
+  // Fetch additional user data from database
+  const userData = await db.users.findUnique({
+    where: { authId: session.user.sub },
+    include: { profile: true, preferences: true }
+  });
+
+  // Add custom data to session
+  return {
+    ...session,
+    user: {
+      ...session.user,
+      role: userData?.role,
+      preferences: userData?.preferences
+    }
+  };
+}
+```
+
+**4. Audit logging:**
+
+```typescript
+async onCallback(req, session, state) {
+  // Log authentication event
+  await db.auditLog.create({
+    data: {
+      userId: session.user.sub,
+      event: "USER_LOGIN",
+      timestamp: new Date(),
+      ipAddress: req.ip,
+      userAgent: req.headers.get("user-agent")
+    }
+  });
+
+  return session;
+}
+```
+
+**5. Error handling:**
+
+```typescript
+import { CallbackError } from "@auth0/nextjs-auth0/errors";
+
+async onCallback(req, session, state) {
+  try {
+    // Validate session data
+    if (!session.user.email_verified) {
+      throw new CallbackError(
+        "email_not_verified",
+        "Please verify your email before logging in"
+      );
+    }
+
+    return session;
+  } catch (error) {
+    console.error("Callback error:", error);
+    throw error; // Re-throw to show error page
+  }
+}
+```
+
+## Modifying Session Before Save
+
+Use the `beforeSessionSaved` hook to modify session data before it's persisted.
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  async beforeSessionSaved(req, session) {
+    // Add custom fields to the session
+    return {
+      ...session,
+      user: {
+        ...session.user,
+        customField: "value",
+        timestamp: Date.now()
+      }
+    };
+  }
+});
+```
+
+### Common Use Cases
+
+**1. Add custom claims:**
+
+```typescript
+async beforeSessionSaved(req, session) {
+  // Fetch user role from database
+  const user = await db.users.findUnique({
+    where: { authId: session.user.sub }
+  });
+
+  return {
+    ...session,
+    user: {
+      ...session.user,
+      role: user?.role || "user",
+      permissions: user?.permissions || []
+    }
+  };
+}
+```
+
+**2. Filter sensitive data:**
+
+```typescript
+async beforeSessionSaved(req, session) {
+  // Remove sensitive fields before storing
+  const { password, ssn, ...safeUser } = session.user;
+
+  return {
+    ...session,
+    user: safeUser
+  };
+}
+```
+
+**3. Add timestamps:**
+
+```typescript
+async beforeSessionSaved(req, session) {
+  return {
+    ...session,
+    createdAt: session.createdAt || Date.now(),
+    updatedAt: Date.now()
+  };
+}
+```
+
+## Combining Customizations
+
+You can combine multiple customization approaches:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  // Modify session before saving
+  async beforeSessionSaved(req, session) {
+    return {
+      ...session,
+      user: {
+        ...session.user,
+        lastUpdated: Date.now()
+      }
+    };
+  },
+
+  // Custom logic after callback
+  async onCallback(req, session, state) {
+    // Create or update user
+    await db.users.upsert({
+      where: { authId: session.user.sub },
+      create: {
+        authId: session.user.sub,
+        email: session.user.email
+      },
+      update: {
+        lastLogin: new Date()
+      }
+    });
+
+    // Check if onboarding is needed
+    const user = await db.users.findUnique({
+      where: { authId: session.user.sub }
+    });
+
+    if (!user.hasCompletedOnboarding) {
+      return {
+        session,
+        redirect: "/onboarding"
+      };
+    }
+
+    return session;
+  }
+});
+```
+
+## Best Practices
+
+<Note>
+  - **Validate all user inputs** to prevent security vulnerabilities
+  - **Keep hooks fast** - Avoid long-running operations that slow down authentication
+  - **Handle errors gracefully** - Always catch and log errors in hooks
+  - **Don't store sensitive data** in sessions unless necessary
+  - **Use TypeScript** for type safety when modifying sessions
+  - **Test thoroughly** - Test all customizations in development before deploying
+</Note>
+
+## Security Considerations
+
+<Warning>
+  - **Validate redirect URLs** to prevent open redirect attacks
+  - **Sanitize user input** before using it in database queries or URLs
+  - **Use allowlists** for acceptable values (e.g., connection names)
+  - **Log security events** for audit trails
+  - **Never expose secrets** in logs or error messages
+</Warning>
+
+## Troubleshooting
+
+### Hook not being called
+
+If your hooks aren't executing:
+- Ensure hooks are defined in the `Auth0Client` constructor
+- Check for errors in the hook function (use try-catch)
+- Verify the auth flow is completing successfully
+
+### Redirect not working
+
+If custom redirects aren't working:
+- Ensure the `returnTo` URL is registered in Auth0 Allowed Callback URLs
+- Check that you're returning the correct format from `onCallback`
+- Verify the URL is properly encoded
+
+### Session modifications not persisting
+
+If session changes aren't saved:
+- Use `beforeSessionSaved`, not `onCallback`, for session modifications
+- Ensure you're returning the modified session object
+- Check that the session size doesn't exceed cookie limits (4KB)

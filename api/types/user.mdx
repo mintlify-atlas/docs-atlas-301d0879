@@ -1,0 +1,270 @@
+---
+title: 'User'
+description: 'Represents the authenticated user profile with standard OIDC claims'
+---
+
+## Overview
+
+The `User` interface represents the authenticated user's profile information derived from the ID token claims. It follows the OpenID Connect (OIDC) standard claims specification.
+
+## Type Definition
+
+```typescript
+export interface User {
+  sub: string;
+  name?: string;
+  nickname?: string;
+  given_name?: string;
+  family_name?: string;
+  picture?: string;
+  email?: string;
+  email_verified?: boolean;
+  /**
+   * The organization ID that the user belongs to.
+   * This field is populated when the user logs in through an organization.
+   */
+  org_id?: string;
+
+  [key: string]: any;
+}
+```
+
+## Properties
+
+<ResponseField name="sub" type="string" required>
+  The unique identifier for the user (subject). This is the primary key that uniquely identifies the user across your Auth0 tenant.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The user's full name in displayable form.
+</ResponseField>
+
+<ResponseField name="nickname" type="string">
+  A casual name for the user, which may or may not be the same as their given name.
+</ResponseField>
+
+<ResponseField name="given_name" type="string">
+  The user's given name (first name).
+</ResponseField>
+
+<ResponseField name="family_name" type="string">
+  The user's family name (last name).
+</ResponseField>
+
+<ResponseField name="picture" type="string">
+  URL of the user's profile picture. This is typically a URL pointing to an image.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  The user's email address.
+</ResponseField>
+
+<ResponseField name="email_verified" type="boolean">
+  Boolean indicating whether the user's email address has been verified.
+</ResponseField>
+
+<ResponseField name="org_id" type="string">
+  The unique identifier of the Auth0 organization the user belongs to. This field is only populated when the user authenticates through an organization.
+</ResponseField>
+
+<ResponseField name="[key: string]" type="any">
+  Additional custom claims from the ID token can be accessed as properties. These can include custom user metadata, app metadata, or custom claims added via Auth0 Rules or Actions.
+</ResponseField>
+
+## Usage Examples
+
+### Access User in Server Components (App Router)
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export default async function ProfilePage() {
+  const session = await auth0.getSession();
+  
+  if (!session) {
+    return <div>Please log in</div>;
+  }
+  
+  const { user } = session;
+  
+  return (
+    <div>
+      <h1>Profile</h1>
+      {user.picture && <img src={user.picture} alt="Profile" />}
+      <p>Name: {user.name}</p>
+      <p>Email: {user.email}</p>
+      {user.email_verified && <span>✓ Verified</span>}
+      {user.org_id && <p>Organization: {user.org_id}</p>}
+    </div>
+  );
+}
+```
+
+### Use User Hook in Client Components
+
+```typescript
+'use client';
+
+import { useUser } from '@auth0/nextjs-auth0/client';
+
+export default function UserProfile() {
+  const { user, error, isLoading } = useUser();
+  
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!user) return <div>Not authenticated</div>;
+  
+  return (
+    <div>
+      <h2>Welcome, {user.name || user.email}!</h2>
+      <img src={user.picture} alt={user.name} />
+      <dl>
+        <dt>User ID:</dt>
+        <dd>{user.sub}</dd>
+        <dt>Email:</dt>
+        <dd>{user.email} {user.email_verified && '✓'}</dd>
+        <dt>Nickname:</dt>
+        <dd>{user.nickname}</dd>
+      </dl>
+    </div>
+  );
+}
+```
+
+### Access Custom Claims
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export async function GET() {
+  const session = await auth0.getSession();
+  
+  if (!session) {
+    return Response.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+  
+  const user = session.user as {
+    sub: string;
+    email?: string;
+    // Custom claims from Auth0 Actions
+    'https://myapp.com/roles'?: string[];
+    'https://myapp.com/plan'?: string;
+  };
+  
+  return Response.json({
+    userId: user.sub,
+    email: user.email,
+    roles: user['https://myapp.com/roles'] || [],
+    plan: user['https://myapp.com/plan'] || 'free'
+  });
+}
+```
+
+### Filter User Claims with beforeSessionSaved
+
+Control which claims are stored in the session:
+
+```typescript
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+import type { User } from '@auth0/nextjs-auth0/types';
+
+export const auth0 = new Auth0Client({
+  beforeSessionSaved: async (session, idToken) => {
+    // Only keep specific claims
+    const allowedClaims = [
+      'sub',
+      'name',
+      'email',
+      'email_verified',
+      'picture',
+      'org_id'
+    ];
+    
+    const filteredUser: User = {
+      sub: session.user.sub
+    };
+    
+    for (const claim of allowedClaims) {
+      if (session.user[claim] !== undefined) {
+        filteredUser[claim] = session.user[claim];
+      }
+    }
+    
+    return {
+      ...session,
+      user: filteredUser
+    };
+  }
+});
+```
+
+### Type-Safe User with Custom Claims
+
+Create a typed interface for your custom claims:
+
+```typescript
+import type { User as BaseUser } from '@auth0/nextjs-auth0/types';
+
+interface AppUser extends BaseUser {
+  'https://myapp.com/roles': string[];
+  'https://myapp.com/department': string;
+  'https://myapp.com/employee_id': string;
+}
+
+export async function getUserInfo(): Promise<AppUser | null> {
+  const session = await auth0.getSession();
+  return session?.user as AppUser | null;
+}
+```
+
+## Organization Login
+
+When users log in through an Auth0 organization, the `org_id` field is automatically populated:
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export default async function OrganizationDashboard() {
+  const session = await auth0.getSession();
+  
+  if (!session || !session.user.org_id) {
+    return <div>Please log in through your organization</div>;
+  }
+  
+  return (
+    <div>
+      <h1>Organization Dashboard</h1>
+      <p>Organization ID: {session.user.org_id}</p>
+      <p>Welcome, {session.user.name}</p>
+    </div>
+  );
+}
+```
+
+To require organization login:
+
+```typescript
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+export const auth0 = new Auth0Client({
+  authorizationParameters: {
+    organization: process.env.AUTH0_ORGANIZATION_ID
+  }
+});
+```
+
+## OIDC Standard Claims
+
+The `User` interface is based on the [OpenID Connect Core 1.0 specification](https://openid.net/specs/openid-connect-core-1_0.html#StandardClaims). Additional standard claims that may be present include:
+
+- `updated_at` - Time the user's information was last updated
+- `locale` - User's locale (e.g., "en-US")
+- `zoneinfo` - User's time zone (e.g., "America/New_York")
+- `phone_number` - User's phone number
+- `phone_number_verified` - Whether phone number is verified
+
+## See Also
+
+- [SessionData](/api/types/session-data) - Complete session interface
+- [TokenSet](/api/types/token-set) - Token information
+- [Configuration](/api/types/configuration) - SDK configuration options

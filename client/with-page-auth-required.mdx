@@ -1,0 +1,374 @@
+---
+title: withPageAuthRequired (Client)
+description: Higher-order component to protect client-side rendered pages
+---
+
+The `withPageAuthRequired` higher-order component (HOC) protects client-side rendered pages by automatically redirecting unauthenticated users to the login page.
+
+## Import
+
+```typescript
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+```
+
+<Note>
+  This is the **client-side** version of `withPageAuthRequired`. For server-side page protection, see [withPageAuthRequired (Server)](/server/with-page-auth-required).
+</Note>
+
+## Signature
+
+```typescript
+function withPageAuthRequired<P extends object>(
+  Component: ComponentType<P & UserProps>,
+  options?: WithPageAuthRequiredOptions
+): React.FC<P>
+```
+
+## Parameters
+
+<ParamField path="Component" type="ComponentType<P & UserProps>" required>
+  The component to protect. The wrapped component will receive a `user` prop containing the authenticated user object.
+</ParamField>
+
+<ParamField path="options" type="WithPageAuthRequiredOptions" optional>
+  Configuration options for the HOC.
+
+  <ParamField path="options.returnTo" type="string" optional>
+    The path to return the user to after login. If not specified, the user will be returned to the current page.
+  </ParamField>
+
+  <ParamField path="options.onRedirecting" type="() => JSX.Element" optional>
+    Custom component to render while redirecting to login. Defaults to an empty fragment.
+  </ParamField>
+
+  <ParamField path="options.onError" type="(error: Error) => JSX.Element" optional>
+    Custom component to render when there's an error fetching user data. Defaults to an empty fragment.
+  </ParamField>
+</ParamField>
+
+## Return Value
+
+Returns a new React functional component that:
+
+- Checks for user authentication
+- Redirects to login if not authenticated
+- Passes the `user` prop to the wrapped component
+- Handles loading and error states
+
+## Basic Usage
+
+```tsx app/dashboard/page.tsx
+"use client";
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+
+function Dashboard({ user }) {
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>Welcome, {user.name}!</p>
+      <img src={user.picture} alt={user.name} />
+    </div>
+  );
+}
+
+export default withPageAuthRequired(Dashboard);
+```
+
+## Custom Return Path
+
+Specify where to redirect after login:
+
+```tsx
+"use client";
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+
+function Profile({ user }) {
+  return (
+    <div>
+      <h1>Profile</h1>
+      <p>{user.email}</p>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(Profile, {
+  returnTo: '/profile'
+});
+```
+
+## Custom Loading State
+
+Show a custom component while redirecting to login:
+
+```tsx
+"use client";
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+
+function Settings({ user }) {
+  return (
+    <div>
+      <h1>Settings</h1>
+      <p>User ID: {user.sub}</p>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(Settings, {
+  onRedirecting: () => (
+    <div className="loading-spinner">
+      <p>Redirecting to login...</p>
+    </div>
+  )
+});
+```
+
+## Custom Error Handling
+
+Handle errors when fetching user data:
+
+```tsx
+"use client";
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+
+function Admin({ user }) {
+  return (
+    <div>
+      <h1>Admin Panel</h1>
+      <p>Logged in as: {user.email}</p>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(Admin, {
+  onError: (error) => (
+    <div className="error">
+      <h1>Authentication Error</h1>
+      <p>{error.message}</p>
+      <a href="/auth/login">Try Again</a>
+    </div>
+  )
+});
+```
+
+## Complete Example
+
+```tsx
+"use client";
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+
+function ProtectedPage({ user }) {
+  return (
+    <div>
+      <h1>Protected Content</h1>
+      <div className="user-info">
+        <img src={user.picture} alt={user.name} />
+        <div>
+          <p><strong>Name:</strong> {user.name}</p>
+          <p><strong>Email:</strong> {user.email}</p>
+          <p><strong>User ID:</strong> {user.sub}</p>
+        </div>
+      </div>
+      <a href="/auth/logout">Logout</a>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(ProtectedPage, {
+  returnTo: '/protected',
+  onRedirecting: () => (
+    <div className="flex items-center justify-center min-h-screen">
+      <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-gray-900" />
+    </div>
+  ),
+  onError: (error) => (
+    <div className="error-container">
+      <h1>Oops! Something went wrong</h1>
+      <p>{error.message}</p>
+      <button onClick={() => window.location.reload()}>
+        Retry
+      </button>
+    </div>
+  )
+});
+```
+
+## With TypeScript
+
+```tsx
+"use client";
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+import type { User } from '@auth0/nextjs-auth0';
+
+interface DashboardProps {
+  customProp: string;
+}
+
+function Dashboard({ user, customProp }: DashboardProps & { user: User }) {
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>Welcome, {user.name}!</p>
+      <p>Custom: {customProp}</p>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(Dashboard);
+```
+
+## Passing Additional Props
+
+```tsx
+"use client";
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+
+function DataViewer({ user, dataSource }) {
+  return (
+    <div>
+      <h1>Data from {dataSource}</h1>
+      <p>Viewing as: {user.email}</p>
+    </div>
+  );
+}
+
+const ProtectedDataViewer = withPageAuthRequired(DataViewer);
+
+export default function Page() {
+  return <ProtectedDataViewer dataSource="Analytics API" />;
+}
+```
+
+## How It Works
+
+The HOC performs the following steps:
+
+1. **Uses `useUser` hook** to fetch user data
+2. **Checks authentication state**:
+   - If `isLoading` is `true`, renders `onRedirecting` component
+   - If `error` exists, renders `onError` component
+   - If no `user` and not loading, redirects to login
+3. **Constructs login URL** with `returnTo` parameter
+4. **Redirects** using `window.location.assign()`
+5. **Passes `user` prop** to wrapped component once authenticated
+
+## Redirect Flow
+
+When an unauthenticated user visits a protected page:
+
+1. User visits `/dashboard`
+2. `withPageAuthRequired` detects no user
+3. Redirects to `/auth/login?returnTo=/dashboard`
+4. User completes authentication
+5. Auth0 redirects back to `/dashboard`
+6. User sees the protected content
+
+## Client vs Server Protection
+
+| Feature | Client (CSR) | Server (SSR) |
+|---------|--------------|-------------|
+| **Rendering** | Client-side | Server-side |
+| **Protection** | After page load | Before page load |
+| **Loading Flash** | May show loading state | No loading state |
+| **SEO** | Not crawlable | Crawlable (if public) |
+| **Use Case** | Interactive client components | SEO-friendly pages |
+
+### When to Use Client Protection
+
+- Client-side rendered (CSR) pages
+- Pages with heavy client-side interactions
+- Single-page application (SPA) patterns
+- When you need custom loading/error states
+
+### When to Use Server Protection
+
+Use the [server-side version](/server/with-page-auth-required) for:
+
+- Server-side rendered (SSR) pages
+- Better SEO
+- Faster initial page loads
+- No flash of unauthenticated content
+
+## Environment Variables
+
+The HOC uses the login route for redirects:
+
+```bash .env.local
+# Default: /auth/login
+NEXT_PUBLIC_LOGIN_ROUTE=/api/auth/login
+```
+
+## Common Patterns
+
+### Role-Based Access Control
+
+```tsx
+"use client";
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
+
+function AdminPanel({ user }) {
+  const router = useRouter();
+  
+  useEffect(() => {
+    // Check if user has admin role
+    const roles = user['https://example.com/roles'] || [];
+    if (!roles.includes('admin')) {
+      router.push('/unauthorized');
+    }
+  }, [user, router]);
+  
+  return (
+    <div>
+      <h1>Admin Panel</h1>
+      <p>Welcome, admin {user.name}!</p>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(AdminPanel);
+```
+
+### Organization Check
+
+```tsx
+"use client";
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
+
+function OrgDashboard({ user }) {
+  const router = useRouter();
+  
+  useEffect(() => {
+    // Ensure user belongs to an organization
+    if (!user.org_id) {
+      router.push('/join-organization');
+    }
+  }, [user, router]);
+  
+  return (
+    <div>
+      <h1>Organization Dashboard</h1>
+      <p>Organization ID: {user.org_id}</p>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(OrgDashboard);
+```
+
+## See Also
+
+- [withPageAuthRequired (Server)](/server/with-page-auth-required) - Server-side page protection
+- [useUser](/client/use-user) - Access user data in components
+- [withApiAuthRequired](/server/with-api-auth-required) - Protect API routes

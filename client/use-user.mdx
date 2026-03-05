@@ -1,0 +1,305 @@
+---
+title: useUser
+description: React hook for accessing authenticated user data in client components
+---
+
+The `useUser` hook provides access to the authenticated user's profile and session state in client components. It uses SWR (Stale-While-Revalidate) for efficient data fetching and caching.
+
+## Import
+
+```typescript
+import { useUser } from '@auth0/nextjs-auth0';
+```
+
+<Note>
+  This hook must be used in client components (marked with `"use client"` directive).
+</Note>
+
+## Signature
+
+```typescript
+function useUser(): {
+  user: User | null | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  invalidate: () => void;
+}
+```
+
+## Return Value
+
+The hook returns an object with the following properties:
+
+<ParamField path="user" type="User | null | undefined">
+  The authenticated user object, `null` if not authenticated, or `undefined` while loading.
+  
+  The `User` type includes:
+  - `sub` - User ID (subject)
+  - `name` - Full name
+  - `nickname` - Nickname
+  - `given_name` - First name
+  - `family_name` - Last name
+  - `picture` - Profile picture URL
+  - `email` - Email address
+  - `email_verified` - Email verification status
+  - `org_id` - Organization ID (if logged in through an organization)
+  - Additional custom claims
+</ParamField>
+
+<ParamField path="isLoading" type="boolean">
+  `true` while the user data is being fetched, `false` otherwise.
+</ParamField>
+
+<ParamField path="error" type="Error | null">
+  Error object if fetching user data failed, `null` otherwise.
+</ParamField>
+
+<ParamField path="invalidate" type="() => void">
+  Function to manually trigger a revalidation of the user data.
+</ParamField>
+
+## Basic Usage
+
+```tsx app/profile/page.tsx
+"use client";
+
+import { useUser } from '@auth0/nextjs-auth0';
+
+export default function Profile() {
+  const { user, isLoading, error } = useUser();
+
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!user) return <div>Not authenticated</div>;
+
+  return (
+    <div>
+      <h1>Profile</h1>
+      <div>
+        <img src={user.picture} alt={user.name} />
+        <h2>{user.name}</h2>
+        <p>{user.email}</p>
+      </div>
+    </div>
+  );
+}
+```
+
+## Usage with Auth0Provider
+
+For optimal performance, wrap your application with `Auth0Provider` to provide initial user data:
+
+```tsx app/layout.tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import { auth0 } from '@/lib/auth0';
+
+export default async function RootLayout({
+  children
+}: {
+  children: React.ReactNode;
+}) {
+  const session = await auth0.getSession();
+
+  return (
+    <html lang="en">
+      <body>
+        <Auth0Provider user={session?.user}>
+          {children}
+        </Auth0Provider>
+      </body>
+    </html>
+  );
+}
+```
+
+This eliminates the initial loading state when the page first renders.
+
+## Manual Revalidation
+
+You can manually trigger a refresh of user data using the `invalidate` function:
+
+```tsx
+"use client";
+
+import { useUser } from '@auth0/nextjs-auth0';
+
+export default function ProfileEditor() {
+  const { user, invalidate } = useUser();
+
+  async function updateProfile(data) {
+    await fetch('/api/profile', {
+      method: 'POST',
+      body: JSON.stringify(data)
+    });
+    
+    // Refresh user data after update
+    invalidate();
+  }
+
+  return (
+    <form onSubmit={(e) => {
+      e.preventDefault();
+      updateProfile({ name: e.target.name.value });
+    }}>
+      <input name="name" defaultValue={user?.name} />
+      <button type="submit">Save</button>
+    </form>
+  );
+}
+```
+
+## Conditional Rendering
+
+```tsx
+"use client";
+
+import { useUser } from '@auth0/nextjs-auth0';
+
+export default function Navigation() {
+  const { user, isLoading } = useUser();
+
+  if (isLoading) {
+    return <nav>...</nav>;
+  }
+
+  return (
+    <nav>
+      {user ? (
+        <>
+          <a href="/profile">Profile</a>
+          <a href="/auth/logout">Logout</a>
+        </>
+      ) : (
+        <a href="/auth/login">Login</a>
+      )}
+    </nav>
+  );
+}
+```
+
+## Error Handling
+
+```tsx
+"use client";
+
+import { useUser } from '@auth0/nextjs-auth0';
+
+export default function UserStatus() {
+  const { user, isLoading, error, invalidate } = useUser();
+
+  if (isLoading) {
+    return <div>Loading user data...</div>;
+  }
+
+  if (error) {
+    return (
+      <div>
+        <p>Failed to load user: {error.message}</p>
+        <button onClick={invalidate}>Retry</button>
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <a href="/auth/login">Please log in</a>;
+  }
+
+  return <p>Logged in as {user.email}</p>;
+}
+```
+
+## Understanding SWR Behavior
+
+The `useUser` hook uses SWR (Stale-While-Revalidate) under the hood, which provides:
+
+- **Event-driven revalidation**: Data automatically revalidates when you:
+  - Focus the browser tab
+  - Reconnect to the internet
+  - Mount the component
+- **No background polling**: The hook does **not** make continuous background requests unless explicitly configured
+- **Cache-first approach**: Returns cached data immediately, then revalidates if needed
+
+### Customizing SWR Behavior
+
+While `useUser` doesn't expose SWR configuration directly, you can control revalidation behavior globally via `Auth0Provider`:
+
+```tsx app/layout.tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import { SWRConfig } from 'swr';
+
+export default function RootLayout({ children }) {
+  return (
+    <html>
+      <body>
+        <SWRConfig
+          value={{
+            revalidateOnFocus: false,
+            revalidateOnReconnect: false,
+            refreshInterval: 0 // Disable polling
+          }}
+        >
+          <Auth0Provider>
+            {children}
+          </Auth0Provider>
+        </SWRConfig>
+      </body>
+    </html>
+  );
+}
+```
+
+## API Route
+
+The `useUser` hook fetches data from the `/auth/profile` route (configurable via `NEXT_PUBLIC_PROFILE_ROUTE` environment variable).
+
+If you're using custom routes, ensure your profile endpoint returns user data:
+
+```typescript app/api/auth/profile/route.ts
+import { auth0 } from '@/lib/auth0';
+import { NextResponse } from 'next/server';
+
+export async function GET() {
+  const session = await auth0.getSession();
+  
+  if (!session) {
+    return new NextResponse(null, { status: 204 });
+  }
+  
+  return NextResponse.json(session.user);
+}
+```
+
+## TypeScript
+
+```typescript
+import { useUser } from '@auth0/nextjs-auth0';
+import type { User } from '@auth0/nextjs-auth0';
+
+interface ExtendedUser extends User {
+  customClaim: string;
+}
+
+export default function Profile() {
+  const { user } = useUser();
+  
+  // Type assertion for custom claims
+  const extendedUser = user as ExtendedUser;
+  
+  return <div>{extendedUser?.customClaim}</div>;
+}
+```
+
+## Custom Environment Variables
+
+You can customize the profile API route:
+
+```bash .env.local
+# Default: /auth/profile
+NEXT_PUBLIC_PROFILE_ROUTE=/api/auth/profile
+```
+
+## See Also
+
+- [Auth0Provider](/client/auth0-provider) - Context provider for initial user data
+- [withPageAuthRequired](/client/with-page-auth-required) - Higher-order component for protected pages
+- [getSession (Server)](/server/get-session) - Server-side user access

@@ -1,0 +1,373 @@
+---
+title: Configuration
+description: Complete reference for all Auth0Client configuration options
+---
+
+The `Auth0Client` can be customized using configuration options passed to the constructor or via environment variables.
+
+## Basic Setup
+
+```typescript
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  domain: "example.us.auth0.com",
+  clientId: "your-client-id",
+  clientSecret: "your-client-secret",
+  secret: "your-32-char-secret",
+  appBaseUrl: "https://app.example.com"
+});
+```
+
+## Required Configuration
+
+<ParamField path="domain" type="string">
+  The Auth0 domain for your tenant (e.g., `example.us.auth0.com` or `https://example.us.auth0.com`).
+  
+  **Environment variable:** `AUTH0_DOMAIN`
+</ParamField>
+
+<ParamField path="clientId" type="string">
+  The Auth0 client ID for your application.
+  
+  **Environment variable:** `AUTH0_CLIENT_ID`
+</ParamField>
+
+<ParamField path="secret" type="string">
+  A 32-byte, hex-encoded secret used for encrypting cookies. Generate using:
+  
+  ```bash
+  openssl rand -hex 32
+  ```
+  
+  **Environment variable:** `AUTH0_SECRET`
+</ParamField>
+
+<ParamField path="clientSecret" type="string">
+  The Auth0 client secret. Required unless using `clientAssertionSigningKey`.
+  
+  **Environment variable:** `AUTH0_CLIENT_SECRET`
+</ParamField>
+
+## Optional Configuration
+
+### Application Settings
+
+<ParamField path="appBaseUrl" type="string">
+  The URL of your application (e.g., `http://localhost:3000`).
+  
+  If omitted, the SDK will infer it from the request host at runtime. This is useful for dynamic preview environments (Vercel, Netlify).
+  
+  **Environment variable:** `APP_BASE_URL`
+  
+  **Security note:** When using dynamic base URLs in production, the SDK enforces secure cookies. Explicitly setting `secure=false` will throw `InvalidConfigurationError`.
+</ParamField>
+
+<ParamField path="signInReturnToPath" type="string" default="/">
+  The path to redirect users to after successful authentication.
+</ParamField>
+
+<ParamField path="enableTelemetry" type="boolean" default="true">
+  Send library name and version to your authorization server via the `Auth0-Client` header.
+</ParamField>
+
+<ParamField path="httpTimeout" type="number" default="5000">
+  HTTP timeout in milliseconds for authentication requests.
+</ParamField>
+
+<ParamField path="allowInsecureRequests" type="boolean" default="false">
+  Allow insecure requests to the authorization server (useful for testing with mock OIDC providers).
+  
+  **Note:** Can only be used when `NODE_ENV` is not set to `production`.
+</ParamField>
+
+### Authorization Parameters
+
+<ParamField path="authorizationParameters" type="AuthorizationParameters">
+  Authorization parameters to pass to the `/authorize` endpoint.
+  
+  ```typescript
+  {
+    authorizationParameters: {
+      audience: "https://api.example.com",
+      scope: "openid profile email read:posts"
+    }
+  }
+  ```
+  
+  See [Passing authorization parameters](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#passing-authorization-parameters) for more details.
+</ParamField>
+
+### Logout Configuration
+
+<ParamField path="logoutStrategy" type="'auto' | 'oidc' | 'v2'" default="auto">
+  Strategy for logout endpoint selection:
+  
+  - `auto`: Uses OIDC logout when available, falls back to `/v2/logout`
+  - `oidc`: Always uses OIDC logout
+  - `v2`: Always uses `/v2/logout` endpoint which supports wildcard URLs
+  
+  See [Configuring logout strategy](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#configuring-logout-strategy) for details.
+</ParamField>
+
+<ParamField path="includeIdTokenHintInOIDCLogoutUrl" type="boolean" default="true">
+  Configure whether to include `id_token_hint` in OIDC logout URLs.
+  
+  - `true` (recommended): Includes ID token for better DoS protection
+  - `false`: Excludes PII from logout URLs but reduces DoS protection
+  
+  See [OIDC logout privacy configuration](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#oidc-logout-privacy-configuration) for details.
+</ParamField>
+
+### Session Configuration
+
+<ParamField path="session" type="SessionConfiguration">
+  Configure session timeouts, rolling sessions, and cookie attributes.
+  
+  ```typescript
+  {
+    session: {
+      rolling: true,
+      rollingDuration: 86400, // 24 hours
+      absoluteDuration: 604800, // 7 days
+      cookie: {
+        domain: ".example.com",
+        path: "/",
+        transient: false,
+        secure: true,
+        sameSite: "lax"
+      }
+    }
+  }
+  ```
+  
+  **Cookie environment variables:**
+  - `AUTH0_COOKIE_DOMAIN`
+  - `AUTH0_COOKIE_PATH`
+  - `AUTH0_COOKIE_TRANSIENT`
+  - `AUTH0_COOKIE_SECURE`
+  - `AUTH0_COOKIE_SAME_SITE`
+  
+  **Note:** `httpOnly` is always `true` for security.
+  
+  See [Session Configuration](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#session-configuration) and [Cookie Configuration](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#cookie-configuration) for details.
+</ParamField>
+
+<ParamField path="sessionStore" type="SessionStore">
+  Custom session store implementation for persisting sessions to an external data store.
+  
+  See [Database sessions](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#database-sessions) for details.
+</ParamField>
+
+### Transaction Cookies
+
+<ParamField path="enableParallelTransactions" type="boolean" default="true">
+  Enable support for multiple concurrent authentication flows.
+  
+  - `true`: Each authentication attempt gets its own transaction cookie with a unique state suffix
+  - `false`: Uses a single shared transaction cookie (may cause conflicts with concurrent auth attempts)
+  
+  See [Transaction Cookie Configuration](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#transaction-cookie-configuration) for details.
+</ParamField>
+
+<ParamField path="transactionCookie" type="TransactionCookieOptions">
+  Configure transaction cookie management for authentication flows.
+  
+  ```typescript
+  {
+    transactionCookie: {
+      duration: 600, // 10 minutes
+      secure: true,
+      sameSite: "lax"
+    }
+  }
+  ```
+  
+  See [Transaction Cookie Configuration](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#transaction-cookie-configuration) for details.
+</ParamField>
+
+### Advanced OAuth
+
+<ParamField path="clientAssertionSigningKey" type="string | CryptoKey">
+  Private key for use with `private_key_jwt` clients.
+  
+  **Environment variable:** `AUTH0_CLIENT_ASSERTION_SIGNING_KEY`
+</ParamField>
+
+<ParamField path="clientAssertionSigningAlg" type="string">
+  The algorithm used to sign the client assertion JWT.
+  
+  **Environment variable:** `AUTH0_CLIENT_ASSERTION_SIGNING_ALG`
+</ParamField>
+
+<ParamField path="pushedAuthorizationRequests" type="boolean" default="false">
+  Configure the SDK to use Pushed Authorization Requests (PAR) protocol when communicating with the authorization server.
+</ParamField>
+
+### DPoP (Demonstrating Proof-of-Possession)
+
+<ParamField path="useDPoP" type="boolean" default="false">
+  Enable DPoP for enhanced security. When enabled, the client will generate DPoP proofs for token requests and protected resource requests.
+  
+  DPoP binds access tokens to cryptographic key pairs, preventing token theft and replay attacks.
+</ParamField>
+
+<ParamField path="dpopKeyPair" type="DpopKeyPair">
+  ES256 key pair for DPoP proof generation.
+  
+  ```typescript
+  import { generateKeyPair } from "oauth4webapi";
+  
+  const dpopKeyPair = await generateKeyPair("ES256");
+  
+  const auth0 = new Auth0Client({
+    useDPoP: true,
+    dpopKeyPair
+  });
+  ```
+  
+  If not provided, the SDK will attempt to load keys from environment variables:
+  - `AUTH0_DPOP_PUBLIC_KEY` (PEM format)
+  - `AUTH0_DPOP_PRIVATE_KEY` (PEM format)
+</ParamField>
+
+<ParamField path="dpopOptions" type="DpopOptions">
+  Configure DPoP timing validation to handle clock differences between client and server.
+  
+  ```typescript
+  {
+    dpopOptions: {
+      clockSkew: 120,      // Adjust for local clock being 2 minutes behind
+      clockTolerance: 45   // Allow 45 seconds tolerance for validation
+    }
+  }
+  ```
+  
+  **Environment variables:**
+  - `AUTH0_DPOP_CLOCK_SKEW`: Clock adjustment in seconds
+  - `AUTH0_DPOP_CLOCK_TOLERANCE`: Tolerance in seconds
+  
+  See [DPoP Clock Validation](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#dpop-clock-validation) for details.
+</ParamField>
+
+### Custom Routes
+
+<ParamField path="routes" type="Routes">
+  Configure the paths for authentication routes.
+  
+  ```typescript
+  {
+    routes: {
+      login: "/custom-login",
+      logout: "/custom-logout",
+      callback: "/custom-callback",
+      profile: "/custom-profile",
+      accessToken: "/custom-access-token",
+      backchannelLogout: "/custom-backchannel-logout"
+    }
+  }
+  ```
+  
+  See [Custom routes](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#custom-routes) for details.
+</ParamField>
+
+### Hooks
+
+<ParamField path="beforeSessionSaved" type="BeforeSessionSavedHook">
+  A method to manipulate the session before persisting it.
+  
+  ```typescript
+  {
+    beforeSessionSaved: async (session) => {
+      session.user.customClaim = "value";
+      return session;
+    }
+  }
+  ```
+  
+  See [beforeSessionSaved](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#beforesessionsaved) for details.
+</ParamField>
+
+<ParamField path="onCallback" type="OnCallbackHook">
+  A method to handle errors or manage redirects after attempting to authenticate.
+  
+  ```typescript
+  {
+    onCallback: async (req, session, state) => {
+      return {
+        redirectTo: state?.returnTo || "/dashboard"
+      };
+    }
+  }
+  ```
+  
+  See [onCallback](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md#oncallback) for details.
+</ParamField>
+
+## Access Token Configuration
+
+<ParamField path="enableAccessTokenEndpoint" type="boolean" default="true">
+  Enable the `/auth/access-token` endpoint for client-side access token retrieval.
+  
+  Disable this if you don't need access tokens on the client-side.
+</ParamField>
+
+<ParamField path="tokenRefreshBuffer" type="number" default="0">
+  Refresh access tokens this many seconds before they expire.
+  
+  Useful for ensuring tokens don't expire mid-request.
+</ParamField>
+
+## Base Path Configuration
+
+<ParamField path="NEXT_PUBLIC_BASE_PATH" type="string" env>
+  Set this environment variable when your Next.js application uses a base path (configured via `basePath` in `next.config.js`).
+  
+  Example: If set to `/dashboard`, authentication routes will be mounted at:
+  - `/dashboard/auth/login`
+  - `/dashboard/auth/callback`
+  - `/dashboard/auth/logout`
+  
+  **Note:** Do not use `NEXT_PUBLIC_BASE_PATH` with an `APP_BASE_URL` that contains a path component. Set `APP_BASE_URL` to the root URL and use `NEXT_PUBLIC_BASE_PATH` for the base path.
+</ParamField>
+
+## Configuration Validation
+
+The SDK validates required configuration options when initializing the `Auth0Client`. Missing required options will result in a warning with details on how to provide them.
+
+**Required options:**
+- `domain` or `AUTH0_DOMAIN`
+- `clientId` or `AUTH0_CLIENT_ID`
+- `secret` or `AUTH0_SECRET`
+- Either:
+  - `clientSecret` or `AUTH0_CLIENT_SECRET`, OR
+  - `clientAssertionSigningKey` or `AUTH0_CLIENT_ASSERTION_SIGNING_KEY`
+
+**Optional:**
+- `appBaseUrl` or `APP_BASE_URL` (inferred from request if omitted)
+
+## Environment Variables Summary
+
+| Variable | Description | Required |
+|----------|-------------|----------|
+| `AUTH0_DOMAIN` | Auth0 tenant domain | Yes |
+| `AUTH0_CLIENT_ID` | Application client ID | Yes |
+| `AUTH0_CLIENT_SECRET` | Application client secret | Yes* |
+| `AUTH0_SECRET` | Session encryption key (32 chars min) | Yes |
+| `APP_BASE_URL` | Application base URL | No** |
+| `AUTH0_CLIENT_ASSERTION_SIGNING_KEY` | Private key for `private_key_jwt` | No |
+| `AUTH0_CLIENT_ASSERTION_SIGNING_ALG` | Client assertion signing algorithm | No |
+| `AUTH0_COOKIE_DOMAIN` | Cookie domain | No |
+| `AUTH0_COOKIE_PATH` | Cookie path | No |
+| `AUTH0_COOKIE_TRANSIENT` | Transient cookie flag | No |
+| `AUTH0_COOKIE_SECURE` | Secure cookie flag | No |
+| `AUTH0_COOKIE_SAME_SITE` | SameSite cookie attribute | No |
+| `AUTH0_DPOP_PUBLIC_KEY` | DPoP public key (PEM) | No |
+| `AUTH0_DPOP_PRIVATE_KEY` | DPoP private key (PEM) | No |
+| `AUTH0_DPOP_CLOCK_SKEW` | DPoP clock adjustment (seconds) | No |
+| `AUTH0_DPOP_CLOCK_TOLERANCE` | DPoP validation tolerance (seconds) | No |
+| `NEXT_PUBLIC_BASE_PATH` | Next.js base path | No |
+
+\* Required unless using `AUTH0_CLIENT_ASSERTION_SIGNING_KEY`
+
+\*\* Inferred from request host if omitted

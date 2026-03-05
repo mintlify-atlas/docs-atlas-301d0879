@@ -1,0 +1,280 @@
+---
+title: DPoP Errors
+description: DPoP (Demonstrating Proof-of-Possession) related errors in the Auth0 Next.js SDK
+---
+
+## Overview
+
+DPoP (Demonstrating Proof-of-Possession) is an OAuth 2.0 extension that provides application-level proof-of-possession security by binding access tokens to cryptographic key pairs. DPoP errors are thrown when DPoP-related operations fail, such as key pair operations, proof generation, or configuration issues.
+
+<Info>
+  DPoP is defined in [RFC 9449: OAuth 2.0 Demonstrating Proof-of-Possession at the Application Layer](https://datatracker.ietf.org/doc/html/rfc9449)
+</Info>
+
+## DPoPError
+
+Thrown when a DPoP operation fails. All DPoP errors extend from [`SdkError`](/api/errors/sdk-error).
+
+### Properties
+
+<ResponseField name="code" type="DPoPErrorCode" required>
+  The specific DPoP error code indicating the type of failure. See [DPoP Error Codes](#dpop-error-codes) below.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  A descriptive error message explaining what went wrong.
+</ResponseField>
+
+<ResponseField name="cause" type="Error | undefined">
+  The underlying error that caused this DPoP error, if available.
+</ResponseField>
+
+## DPoP Error Codes
+
+The `DPoPErrorCode` enum categorizes different types of DPoP failures:
+
+```typescript
+enum DPoPErrorCode {
+  DPOP_JKT_CALCULATION_FAILED = "dpop_jkt_calculation_failed",
+  DPOP_KEY_EXPORT_FAILED = "dpop_key_export_failed",
+  DPOP_CONFIGURATION_ERROR = "dpop_configuration_error"
+}
+```
+
+### DPOP_JKT_CALCULATION_FAILED
+
+Failed to calculate the `dpop_jkt` (JWK thumbprint) parameter.
+
+**When Thrown:**
+- The SDK cannot generate the required thumbprint from the provided public key for the authorization request
+- Invalid or corrupted key pair
+- Incompatible key algorithm
+
+**Example:**
+
+```typescript
+import { Auth0Client, DPoPError } from '@auth0/nextjs-auth0/server';
+
+try {
+  const auth0 = new Auth0Client({
+    useDPoP: true,
+    dpopKeyPair: keyPair // Invalid or corrupted key pair
+  });
+  await auth0.login();
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'dpop_jkt_calculation_failed') {
+      console.error('Failed to calculate JWK thumbprint');
+      console.error('Verify key validity and algorithm');
+      
+      if (error.cause) {
+        console.error('Underlying error:', error.cause);
+      }
+    }
+  }
+}
+```
+
+### DPOP_KEY_EXPORT_FAILED
+
+Failed to export DPoP public key to JWK format.
+
+**When Thrown:**
+- The SDK cannot convert the `CryptoKey` to the JSON Web Key format required for DPoP proofs
+- Key is not extractable
+- Unsupported key type or algorithm
+
+**Example:**
+
+```typescript
+try {
+  const auth0 = new Auth0Client({
+    useDPoP: true,
+    dpopKeyPair: {
+      privateKey: nonExtractablePrivateKey,
+      publicKey: nonExtractablePublicKey
+    }
+  });
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'dpop_key_export_failed') {
+      console.error('Unable to export public key to JWK format');
+      console.error('Ensure keys are extractable and use supported algorithms');
+    }
+  }
+}
+```
+
+### DPOP_CONFIGURATION_ERROR
+
+DPoP configuration is invalid or incomplete.
+
+**When Thrown:**
+- The provided DPoP configuration contains invalid values
+- Missing required DPoP configuration components
+- Incompatible DPoP configuration options
+
+**Example:**
+
+```typescript
+try {
+  const auth0 = new Auth0Client({
+    useDPoP: true,
+    // Missing dpopKeyPair
+  });
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'dpop_configuration_error') {
+      console.error('Invalid DPoP configuration');
+      console.error('Check options and environment variables');
+    }
+  }
+}
+```
+
+## Complete Error Handling Example
+
+```typescript
+import { Auth0Client, DPoPError, DPoPErrorCode } from '@auth0/nextjs-auth0/server';
+
+try {
+  const auth0 = new Auth0Client({
+    useDPoP: true,
+    dpopKeyPair: await generateKeyPair()
+  });
+  
+  await auth0.login();
+} catch (error) {
+  if (error instanceof DPoPError) {
+    console.error(`DPoP Error [${error.code}]:`, error.message);
+
+    switch (error.code) {
+      case DPoPErrorCode.DPOP_KEY_EXPORT_FAILED:
+        console.error('Key export failed. Check key format and algorithm.');
+        // Regenerate key pair with correct parameters
+        break;
+      
+      case DPoPErrorCode.DPOP_JKT_CALCULATION_FAILED:
+        console.error('JWK thumbprint calculation failed. Verify key validity.');
+        // Validate key pair before retry
+        break;
+      
+      case DPoPErrorCode.DPOP_CONFIGURATION_ERROR:
+        console.error('Invalid DPoP configuration. Check options and environment variables.');
+        // Review DPoP configuration settings
+        break;
+    }
+
+    if (error.cause) {
+      console.error('Underlying cause:', error.cause);
+    }
+  }
+}
+```
+
+## Generating Valid DPoP Key Pairs
+
+To avoid DPoP errors, ensure your key pairs are generated correctly:
+
+```typescript
+import { generateKeyPair } from 'crypto';
+import { promisify } from 'util';
+
+const generateKeyPairAsync = promisify(generateKeyPair);
+
+// Generate a valid ES256 key pair for DPoP
+const { privateKey, publicKey } = await generateKeyPairAsync('ec', {
+  namedCurve: 'P-256',
+  publicKeyEncoding: {
+    type: 'spki',
+    format: 'pem'
+  },
+  privateKeyEncoding: {
+    type: 'pkcs8',
+    format: 'pem'
+  }
+});
+
+// Use with Auth0Client
+const auth0 = new Auth0Client({
+  useDPoP: true,
+  dpopKeyPair: {
+    privateKey: await crypto.subtle.importKey(
+      'pkcs8',
+      Buffer.from(privateKey, 'utf-8'),
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true, // extractable
+      ['sign']
+    ),
+    publicKey: await crypto.subtle.importKey(
+      'spki',
+      Buffer.from(publicKey, 'utf-8'),
+      { name: 'ECDSA', namedCurve: 'P-256' },
+      true, // extractable
+      ['verify']
+    )
+  }
+});
+```
+
+## Common DPoP Issues
+
+<Card title="Non-extractable keys" icon="key">
+  Ensure keys are created with `extractable: true` when using `crypto.subtle.generateKey()` or `crypto.subtle.importKey()`.
+</Card>
+
+<Card title="Unsupported algorithms" icon="lock">
+  DPoP typically supports ES256 (ECDSA with P-256 curve). Verify your authorization server's supported algorithms.
+</Card>
+
+<Card title="Key persistence" icon="database">
+  DPoP key pairs should be persisted across sessions to maintain token binding. Consider storing keys securely in your session or database.
+</Card>
+
+<Card title="Browser compatibility" icon="browser">
+  DPoP uses the Web Crypto API. Ensure your environment supports the required cryptographic operations.
+</Card>
+
+## Environment Variables
+
+DPoP can be configured via environment variables:
+
+```bash
+# Enable DPoP
+AUTH0_DPOP_ENABLED=true
+
+# DPoP key pair (if using env vars instead of config)
+AUTH0_DPOP_PRIVATE_KEY=...
+AUTH0_DPOP_PUBLIC_KEY=...
+```
+
+## Catching DPoP Errors by Code
+
+The recommended approach is to check the error code:
+
+```typescript
+import { DPoPErrorCode } from '@auth0/nextjs-auth0/errors';
+
+try {
+  await auth0.login();
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    // Handle DPoP-specific errors
+    if (Object.values(DPoPErrorCode).includes(error.code as DPoPErrorCode)) {
+      console.error('DPoP operation failed:', error.code);
+      
+      // Optionally disable DPoP and retry
+      const auth0Fallback = new Auth0Client({
+        useDPoP: false
+      });
+      await auth0Fallback.login();
+    }
+  }
+}
+```
+
+## Related
+
+- [SdkError](/api/errors/sdk-error) - Base error class
+- [OAuth Errors](/api/errors/oauth-errors) - OAuth 2.0 related errors
+- [RFC 9449: OAuth 2.0 Demonstrating Proof-of-Possession](https://datatracker.ietf.org/doc/html/rfc9449)

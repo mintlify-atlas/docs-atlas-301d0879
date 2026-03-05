@@ -1,0 +1,213 @@
+---
+title: Installation
+description: Install the Auth0 Next.js SDK and configure your environment
+---
+
+## Prerequisites
+
+Before installing the Auth0 Next.js SDK, ensure you have:
+
+- Node.js 20 LTS or newer LTS version
+- A Next.js application (version 14.2.35 or later)
+- An Auth0 account and application
+
+<Note>
+  The SDK supports Next.js 14, 15, and 16, with both the App Router and Pages Router.
+</Note>
+
+## Install the SDK
+
+Install the `@auth0/nextjs-auth0` package using your preferred package manager:
+
+<CodeGroup>
+
+```bash npm
+npm install @auth0/nextjs-auth0
+```
+
+```bash yarn
+yarn add @auth0/nextjs-auth0
+```
+
+```bash pnpm
+pnpm add @auth0/nextjs-auth0
+```
+
+</CodeGroup>
+
+## Configure Environment Variables
+
+Create a `.env.local` file in the root of your project and add the following environment variables:
+
+```env .env.local
+AUTH0_DOMAIN=your-tenant.us.auth0.com
+AUTH0_CLIENT_ID=your_client_id
+AUTH0_CLIENT_SECRET=your_client_secret
+AUTH0_SECRET=use_a_long_secret_value_at_least_32_characters_long
+APP_BASE_URL=http://localhost:3000
+```
+
+### Required Variables
+
+<ParamField path="AUTH0_DOMAIN" type="string" required>
+  Your Auth0 tenant domain (e.g., `example.us.auth0.com` or `https://example.us.auth0.com`). Find this in your [Auth0 Dashboard](https://manage.auth0.com) under your application settings.
+</ParamField>
+
+<ParamField path="AUTH0_CLIENT_ID" type="string" required>
+  Your Auth0 application's client ID. This can be found in the Auth0 Dashboard when you create a **Regular Web Application**.
+</ParamField>
+
+<ParamField path="AUTH0_CLIENT_SECRET" type="string" required>
+  Your Auth0 application's client secret. This is shown in the Auth0 Dashboard alongside the client ID.
+</ParamField>
+
+<ParamField path="AUTH0_SECRET" type="string" required>
+  A 32-byte, hex-encoded secret used for encrypting session cookies. Generate one using:
+  
+  ```bash
+  openssl rand -hex 32
+  ```
+  
+  <Warning>
+    Keep this secret secure and never commit it to version control. Use different secrets for different environments.
+  </Warning>
+</ParamField>
+
+<ParamField path="APP_BASE_URL" type="string">
+  The URL where your application is running. For local development, this is typically `http://localhost:3000`. For production, use your production URL.
+  
+  <Info>
+    You can omit `APP_BASE_URL` to let the SDK infer it from the request host at runtime. This is useful for preview deployments on platforms like Vercel or Netlify.
+  </Info>
+</ParamField>
+
+## Configure Auth0 Application Settings
+
+In your [Auth0 Dashboard](https://manage.auth0.com), configure your application with the following URLs:
+
+<Steps>
+  <Step title="Create a Regular Web Application">
+    If you haven't already, create a new application and select **Regular Web Application** as the application type.
+  </Step>
+  
+  <Step title="Add Callback URLs">
+    Add your callback URL to the **Allowed Callback URLs** field:
+    
+    ```
+    http://localhost:3000/auth/callback
+    ```
+    
+    For production, add your production callback URL:
+    
+    ```
+    https://yourapp.com/auth/callback
+    ```
+  </Step>
+  
+  <Step title="Add Logout URLs">
+    Add your logout URL to the **Allowed Logout URLs** field:
+    
+    ```
+    http://localhost:3000
+    ```
+    
+    For production:
+    
+    ```
+    https://yourapp.com
+    ```
+  </Step>
+</Steps>
+
+<Warning>
+  When using dynamic preview environments (Vercel, Netlify), ensure each preview URL is registered in your Auth0 application, or configure wildcard URLs if supported by your Auth0 plan.
+</Warning>
+
+## Dynamic Base URLs (Preview Deployments)
+
+For preview environments on platforms like Vercel or Netlify, you can omit the `APP_BASE_URL` environment variable. The SDK will automatically infer the base URL from the incoming request host.
+
+<Info>
+  Auth0's Allowed Callback URLs serve as the security boundary. If the inferred host is not registered in your Auth0 application, Auth0 will reject the authorization request.
+</Info>
+
+### Static Base URL (Recommended for Production)
+
+For production environments with a stable domain, explicitly set the `APP_BASE_URL`:
+
+```ts lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  appBaseUrl: "https://app.example.com"
+});
+```
+
+### Dynamic Base URL (Preview Environments)
+
+For dynamic preview URLs, omit the `appBaseUrl` configuration:
+
+```ts lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client();
+```
+
+<Note>
+  When relying on dynamic base URLs in production, the SDK enforces secure cookies. Setting `AUTH0_COOKIE_SECURE=false` will throw an `InvalidConfigurationError`.
+</Note>
+
+## Optional Environment Variables
+
+You can configure additional behavior using these optional environment variables:
+
+```env .env.local
+# Cookie configuration
+AUTH0_COOKIE_DOMAIN=.example.com
+AUTH0_COOKIE_PATH=/
+AUTH0_COOKIE_TRANSIENT=false
+AUTH0_COOKIE_SECURE=true
+AUTH0_COOKIE_SAME_SITE=lax
+
+# DPoP (Demonstrating Proof-of-Possession)
+AUTH0_DPOP_PUBLIC_KEY=-----BEGIN PUBLIC KEY-----\n...
+AUTH0_DPOP_PRIVATE_KEY=-----BEGIN PRIVATE KEY-----\n...
+AUTH0_DPOP_CLOCK_SKEW=0
+AUTH0_DPOP_CLOCK_TOLERANCE=30
+```
+
+## Base Path Configuration
+
+If your Next.js application uses a base path (configured via `basePath` in `next.config.js`), set the `NEXT_PUBLIC_BASE_PATH` environment variable:
+
+```env .env.local
+NEXT_PUBLIC_BASE_PATH=/dashboard
+```
+
+This will mount authentication routes at `/dashboard/auth/login`, `/dashboard/auth/callback`, etc.
+
+<Note>
+  Do not use `NEXT_PUBLIC_BASE_PATH` with an `APP_BASE_URL` that contains a path component. Set `APP_BASE_URL` to the root URL (e.g., `https://example.com`) and use `NEXT_PUBLIC_BASE_PATH` for the base path.
+</Note>
+
+## Verify Installation
+
+To verify your installation is working correctly, you can check that the SDK can be imported:
+
+<CodeGroup>
+
+```ts Server-side
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+const auth0 = new Auth0Client();
+```
+
+```ts Client-side
+import { useUser } from "@auth0/nextjs-auth0/client";
+```
+
+</CodeGroup>
+
+## Next Steps
+
+Now that you've installed and configured the SDK, proceed to the [Quickstart](/quickstart) to implement authentication in your Next.js application.

@@ -1,0 +1,386 @@
+---
+title: Protecting API Routes
+description: Secure your Next.js API routes by requiring authentication with Auth0.
+---
+
+Protect your API routes to ensure only authenticated users can access them. The SDK provides the `withApiAuthRequired` helper for both App Router and Pages Router.
+
+## App Router
+
+Protect App Router route handlers by wrapping them with `withApiAuthRequired`.
+
+<Steps>
+  <Step title="Create your route handler">
+    Create a route handler file in your `app` directory:
+
+    ```typescript app/api/protected/route.ts
+    import { NextResponse } from "next/server";
+    import { auth0 } from "@/lib/auth0";
+
+    export const GET = auth0.withApiAuthRequired(async function GET(req) {
+      const { user } = await auth0.getSession(req);
+
+      return NextResponse.json({
+        message: "This is a protected API route",
+        userId: user.sub
+      });
+    });
+    ```
+  </Step>
+
+  <Step title="Test the route">
+    Test your protected route by making a request:
+
+    ```bash
+    curl http://localhost:3000/api/protected
+    ```
+
+    Without authentication, you'll receive a `401 Unauthorized` response.
+  </Step>
+</Steps>
+
+### Multiple HTTP Methods
+
+Protect multiple HTTP methods in the same route file:
+
+```typescript app/api/data/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { auth0 } from "@/lib/auth0";
+
+export const GET = auth0.withApiAuthRequired(async function GET() {
+  const { user } = await auth0.getSession();
+
+  return NextResponse.json({
+    data: "User data",
+    userId: user.sub
+  });
+});
+
+export const POST = auth0.withApiAuthRequired(async function POST(
+  req: NextRequest
+) {
+  const { user } = await auth0.getSession(req);
+  const body = await req.json();
+
+  // Process the data
+  console.log(`User ${user.sub} posted:`, body);
+
+  return NextResponse.json({ success: true });
+});
+
+export const DELETE = auth0.withApiAuthRequired(async function DELETE(
+  req: NextRequest
+) {
+  const { user } = await auth0.getSession(req);
+
+  // Delete logic here
+
+  return NextResponse.json({ deleted: true });
+});
+```
+
+### Dynamic Routes
+
+Access route parameters in protected API routes:
+
+```typescript app/api/posts/[id]/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { auth0 } from "@/lib/auth0";
+
+export const GET = auth0.withApiAuthRequired(
+  async function GET(req: NextRequest, { params }) {
+    const { user } = await auth0.getSession(req);
+    const { id } = await params;
+
+    return NextResponse.json({
+      postId: id,
+      userId: user.sub,
+      message: `Fetching post ${id} for user ${user.name}`
+    });
+  }
+);
+```
+
+## Pages Router
+
+Protect Pages Router API routes by wrapping the handler function with `withApiAuthRequired`.
+
+<Steps>
+  <Step title="Create your API route">
+    Create an API route file in your `pages/api` directory:
+
+    ```typescript pages/api/protected.ts
+    import type { NextApiRequest, NextApiResponse } from "next";
+    import { auth0 } from "@/lib/auth0";
+
+    export default auth0.withApiAuthRequired(
+      async function handler(req: NextApiRequest, res: NextApiResponse) {
+        const { user } = await auth0.getSession(req);
+
+        res.status(200).json({
+          message: "This is a protected API route",
+          userId: user.sub
+        });
+      }
+    );
+    ```
+  </Step>
+
+  <Step title="Test the route">
+    Make a request to test your protected route:
+
+    ```bash
+    curl http://localhost:3000/api/protected
+    ```
+
+    Without a valid session cookie, you'll receive a `401 Unauthorized` response.
+  </Step>
+</Steps>
+
+### Handling Different HTTP Methods
+
+Handle multiple HTTP methods in a single Pages Router API route:
+
+```typescript pages/api/data.ts
+import type { NextApiRequest, NextApiResponse } from "next";
+import { auth0 } from "@/lib/auth0";
+
+type ResponseData = {
+  message?: string;
+  error?: string;
+};
+
+export default auth0.withApiAuthRequired(
+  async function handler(
+    req: NextApiRequest,
+    res: NextApiResponse<ResponseData>
+  ) {
+    const { user } = await auth0.getSession(req);
+
+    switch (req.method) {
+      case "GET":
+        return res.status(200).json({
+          message: `Hello ${user.name}`
+        });
+
+      case "POST":
+        // Process POST data
+        const body = req.body;
+        return res.status(201).json({
+          message: "Data created"
+        });
+
+      case "DELETE":
+        // Delete logic
+        return res.status(200).json({
+          message: "Data deleted"
+        });
+
+      default:
+        res.setHeader("Allow", ["GET", "POST", "DELETE"]);
+        return res.status(405).json({
+          error: `Method ${req.method} Not Allowed`
+        });
+    }
+  }
+);
+```
+
+### Dynamic API Routes
+
+Access dynamic route parameters in Pages Router:
+
+```typescript pages/api/posts/[id].ts
+import type { NextApiRequest, NextApiResponse } from "next";
+import { auth0 } from "@/lib/auth0";
+
+export default auth0.withApiAuthRequired(
+  async function handler(req: NextApiRequest, res: NextApiResponse) {
+    const { user } = await auth0.getSession(req);
+    const { id } = req.query;
+
+    res.status(200).json({
+      postId: id,
+      userId: user.sub,
+      message: `Fetching post ${id} for user ${user.name}`
+    });
+  }
+);
+```
+
+## Calling Protected API Routes
+
+Once your API routes are protected, you can call them from your frontend with the session cookie.
+
+<Tabs>
+  <Tab title="App Router">
+    Call protected API routes from client components:
+
+    ```tsx app/products/page.tsx
+    "use client";
+
+    import { withPageAuthRequired } from "@auth0/nextjs-auth0/client";
+    import useSWR from "swr";
+
+    const fetcher = async (uri: string) => {
+      const response = await fetch(uri);
+      if (!response.ok) throw new Error("Failed to fetch");
+      return response.json();
+    };
+
+    function Products() {
+      const { data, error } = useSWR("/api/protected", fetcher);
+
+      if (error) return <div>Error: {error.message}</div>;
+      if (!data) return <div>Loading...</div>;
+
+      return <div>{data.message}</div>;
+    }
+
+    export default withPageAuthRequired(Products);
+    ```
+  </Tab>
+
+  <Tab title="Pages Router">
+    Call protected API routes from Pages Router pages:
+
+    ```tsx pages/products.tsx
+    import { withPageAuthRequired } from "@auth0/nextjs-auth0/client";
+    import useSWR from "swr";
+
+    const fetcher = async (uri: string) => {
+      const response = await fetch(uri);
+      if (!response.ok) throw new Error("Failed to fetch");
+      return response.json();
+    };
+
+    function Products() {
+      const { data, error } = useSWR("/api/protected", fetcher);
+
+      if (error) return <div>Error: {error.message}</div>;
+      if (!data) return <div>Loading...</div>;
+
+      return <div>{data.message}</div>;
+    }
+
+    export default withPageAuthRequired(Products);
+    ```
+  </Tab>
+</Tabs>
+
+## Error Responses
+
+When a request to a protected API route fails authentication, the SDK returns a `401 Unauthorized` response:
+
+```json
+{
+  "error": "not_authenticated",
+  "description": "The user does not have an active session or is not authenticated"
+}
+```
+
+## Accessing User Information
+
+Access the authenticated user's information within your protected API route:
+
+```typescript
+import { auth0 } from "@/lib/auth0";
+
+export const GET = auth0.withApiAuthRequired(async function GET(req) {
+  const { user } = await auth0.getSession(req);
+
+  // User object contains:
+  // - user.sub: unique user ID
+  // - user.name: user's name
+  // - user.email: user's email
+  // - user.picture: user's profile picture URL
+  // ... and other profile fields
+
+  return Response.json({
+    userId: user.sub,
+    name: user.name,
+    email: user.email
+  });
+});
+```
+
+## Calling External APIs
+
+To call external APIs from your protected routes, use `getAccessToken` to obtain an access token:
+
+```typescript app/api/external-data/route.ts
+import { NextResponse } from "next/server";
+import { auth0 } from "@/lib/auth0";
+
+export const GET = auth0.withApiAuthRequired(async function GET() {
+  try {
+    // Get access token for external API
+    const { token } = await auth0.getAccessToken();
+
+    // Call external API with the token
+    const response = await fetch("https://api.example.com/data", {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    const data = await response.json();
+    return NextResponse.json(data);
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Failed to fetch data" },
+      { status: 500 }
+    );
+  }
+});
+```
+
+<Note>
+  Learn more about obtaining and using access tokens in the [Access Tokens guide](/guides/access-tokens).
+</Note>
+
+## Best Practices
+
+<Note>
+  - **Always validate user permissions** beyond just authentication when accessing sensitive resources
+  - **Use TypeScript** for type safety with request/response objects
+  - **Handle errors gracefully** and return appropriate HTTP status codes
+  - **Never expose sensitive data** in error messages
+  - **Use HTTPS in production** to protect session cookies from interception
+</Note>
+
+## Troubleshooting
+
+### 401 Errors with Valid Session
+
+If you're getting 401 errors despite being logged in:
+
+1. **Check session cookie**: Ensure the session cookie is being sent with requests
+2. **Verify domain**: If using subdomains, ensure cookie domain is set correctly
+3. **Check SameSite**: Set `sameSite: "lax"` for cross-origin requests
+
+### Session not available in App Router
+
+If `getSession()` returns `null` in App Router:
+
+- Ensure you're passing the `req` parameter: `auth0.getSession(req)`
+- Verify middleware is running on the request path
+- Check that cookies are being sent from the client
+
+### CORS Issues
+
+For API routes called from different origins:
+
+```typescript
+import { NextResponse } from "next/server";
+
+export const GET = auth0.withApiAuthRequired(async function GET(req) {
+  const response = NextResponse.json({ data: "Protected data" });
+
+  // Add CORS headers
+  response.headers.set("Access-Control-Allow-Origin", "https://example.com");
+  response.headers.set("Access-Control-Allow-Credentials", "true");
+
+  return response;
+});
+```

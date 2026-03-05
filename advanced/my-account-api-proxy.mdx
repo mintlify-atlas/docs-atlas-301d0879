@@ -1,0 +1,513 @@
+---
+title: 'My Account API Proxy'
+description: 'Learn how to use the built-in proxy for Auth0 My Account and My Organization Management APIs'
+---
+
+## Overview
+
+The SDK provides built-in proxy support for Auth0's My Account and My Organization Management APIs, enabling secure browser-initiated requests while maintaining server-side DPoP authentication and token management.
+
+<Info>
+The proxy implements a Backend-for-Frontend (BFF) pattern where tokens and DPoP keys remain on the server while the client can make authenticated API calls through proxy endpoints.
+</Info>
+
+## How It Works
+
+The proxy handler automatically intercepts requests to `/me/*` and `/my-org/*` paths in your Next.js application and forwards them to the respective Auth0 APIs with proper authentication headers:
+
+- Tokens and DPoP keys remain on the server
+- Access tokens are automatically retrieved or refreshed
+- DPoP proofs are generated for each request
+- Session updates occur transparently
+
+## My Account API Proxy
+
+The My Account API allows users to manage their profile and authentication settings.
+
+### Configuration
+
+Configure audience and scopes for the My Account API:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  useDPoP: true,
+  authorizationParameters: {
+    audience: "urn:your-api-identifier",
+    scope: {
+      [`https://${process.env.AUTH0_DOMAIN}/me/`]: "profile:read profile:write"
+    }
+  }
+});
+```
+
+<Note>
+Replace `urn:your-api-identifier` with your actual API identifier from the Auth0 Dashboard.
+</Note>
+
+### Client-Side Usage
+
+Make requests through the `/me` proxy path:
+
+```typescript app/profile/page.tsx
+"use client";
+
+import { useEffect, useState } from "react";
+
+export default function Profile() {
+  const [profile, setProfile] = useState(null);
+
+  useEffect(() => {
+    async function fetchProfile() {
+      const response = await fetch("/me/v1/profile", {
+        headers: {
+          "scope": "profile:read"
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setProfile(data);
+      }
+    }
+
+    fetchProfile();
+  }, []);
+
+  if (!profile) return <div>Loading...</div>;
+
+  return (
+    <div>
+      <h1>My Profile</h1>
+      <p>Email: {profile.email}</p>
+      <p>Name: {profile.name}</p>
+    </div>
+  );
+}
+```
+
+### Updating Profile Data
+
+```typescript app/profile/edit/page.tsx
+"use client";
+
+import { useState } from "react";
+
+export default function EditProfile() {
+  const [name, setName] = useState("");
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+
+    const response = await fetch("/me/v1/profile", {
+      method: "PATCH",
+      headers: {
+        "Content-Type": "application/json",
+        "scope": "profile:write"
+      },
+      body: JSON.stringify({
+        name: name
+      })
+    });
+
+    if (response.ok) {
+      alert("Profile updated successfully");
+    } else {
+      alert("Failed to update profile");
+    }
+  }
+
+  return (
+    <form onSubmit={handleSubmit}>
+      <input
+        type="text"
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Your name"
+      />
+      <button type="submit">Update Profile</button>
+    </form>
+  );
+}
+```
+
+### `scope` Header
+
+The `scope` header specifies the required scope for the request. The SDK retrieves an access token with the appropriate audience and scope, then forwards the request with authentication headers.
+
+```typescript
+// Read profile data
+fetch("/me/v1/profile", {
+  headers: { "scope": "profile:read" }
+});
+
+// Update profile data
+fetch("/me/v1/profile", {
+  method: "PATCH",
+  headers: {
+    "Content-Type": "application/json",
+    "scope": "profile:write"
+  },
+  body: JSON.stringify({ name: "New Name" })
+});
+```
+
+## My Organization API Proxy
+
+The My Organization API allows users to manage their organization memberships and settings.
+
+### Configuration
+
+Configure audience and scopes for the My Organization API:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  useDPoP: true,
+  authorizationParameters: {
+    audience: "urn:your-api-identifier",
+    scope: {
+      [`https://${process.env.AUTH0_DOMAIN}/my-org/`]: "org:read org:write"
+    }
+  }
+});
+```
+
+### Client-Side Usage
+
+Make requests through the `/my-org` proxy path:
+
+```typescript app/organization/page.tsx
+"use client";
+
+import { useEffect, useState } from "react";
+
+export default function OrganizationPage() {
+  const [organizations, setOrganizations] = useState([]);
+
+  useEffect(() => {
+    async function fetchOrganizations() {
+      const response = await fetch("/my-org/organizations", {
+        headers: {
+          "scope": "org:read"
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        setOrganizations(data);
+      }
+    }
+
+    fetchOrganizations();
+  }, []);
+
+  return (
+    <div>
+      <h1>My Organizations</h1>
+      <ul>
+        {organizations.map((org) => (
+          <li key={org.id}>{org.name}</li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+```
+
+## Integration with UI Components
+
+The proxy works seamlessly with Auth0's UI components like `@auth0/auth0-react`:
+
+```typescript app/components/ProfileWidget.tsx
+"use client";
+
+import { useUser } from "@auth0/nextjs-auth0";
+import { useEffect, useState } from "react";
+
+export default function ProfileWidget() {
+  const { user, isLoading } = useUser();
+  const [profileData, setProfileData] = useState(null);
+
+  useEffect(() => {
+    if (user) {
+      // Fetch extended profile data via proxy
+      fetch("/me/v1/profile", {
+        headers: { "scope": "profile:read" }
+      })
+        .then((res) => res.json())
+        .then(setProfileData);
+    }
+  }, [user]);
+
+  if (isLoading) return <div>Loading...</div>;
+  if (!user) return <div>Not authenticated</div>;
+
+  return (
+    <div>
+      <h2>{user.name}</h2>
+      {profileData && (
+        <div>
+          <p>Phone: {profileData.phone_number}</p>
+          <p>Verified: {profileData.phone_verified ? "Yes" : "No"}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+```
+
+## HTTP Methods
+
+The proxy supports all standard HTTP methods:
+
+| Method | Usage | Example |
+|--------|-------|------|
+| `GET` | Read data | `fetch("/me/v1/profile")` |
+| `POST` | Create resources | `fetch("/my-org/invitations", { method: "POST" })` |
+| `PATCH` | Update resources | `fetch("/me/v1/profile", { method: "PATCH" })` |
+| `PUT` | Replace resources | `fetch("/me/v1/authenticators", { method: "PUT" })` |
+| `DELETE` | Delete resources | `fetch("/me/v1/sessions/123", { method: "DELETE" })` |
+
+## CORS Handling
+
+The proxy automatically handles CORS for client-side requests:
+
+```typescript
+// No CORS configuration needed on the client
+const response = await fetch("/me/v1/profile", {
+  headers: {
+    "Content-Type": "application/json",
+    "scope": "profile:read"
+  }
+});
+```
+
+## Error Handling
+
+Handle errors appropriately based on HTTP status codes:
+
+```typescript app/profile/page.tsx
+"use client";
+
+import { useState } from "react";
+
+export default function ProfilePage() {
+  const [error, setError] = useState(null);
+
+  async function fetchProfile() {
+    try {
+      const response = await fetch("/me/v1/profile", {
+        headers: { "scope": "profile:read" }
+      });
+
+      if (!response.ok) {
+        if (response.status === 401) {
+          setError("Not authenticated. Please log in.");
+          return;
+        }
+
+        if (response.status === 403) {
+          setError("Insufficient permissions to access profile.");
+          return;
+        }
+
+        if (response.status === 429) {
+          setError("Too many requests. Please try again later.");
+          return;
+        }
+
+        throw new Error(`HTTP ${response.status}`);
+      }
+
+      const data = await response.json();
+      return data;
+    } catch (err) {
+      setError("Failed to fetch profile data.");
+      console.error(err);
+    }
+  }
+
+  // Component rendering...
+}
+```
+
+### Common Error Codes
+
+| Status | Meaning | Solution |
+|--------|---------|----------|
+| `401` | Unauthorized | User needs to log in |
+| `403` | Forbidden | Insufficient scopes or permissions |
+| `404` | Not Found | Resource doesn't exist |
+| `429` | Too Many Requests | Implement rate limiting/retry logic |
+| `500` | Internal Server Error | Check Auth0 service status |
+
+## Token Management
+
+The proxy automatically handles token management:
+
+- **Token Retrieval**: Fetches access tokens with the correct audience and scope
+- **Token Refresh**: Automatically refreshes expired tokens using refresh tokens
+- **Token Caching**: Caches tokens to minimize Auth0 API calls
+- **DPoP Proofs**: Generates DPoP proofs for each request when enabled
+
+```typescript
+// Token is automatically managed - no client-side token handling needed
+const response = await fetch("/me/v1/profile", {
+  headers: { "scope": "profile:read" }
+});
+```
+
+## Security Considerations
+
+### Best Practices
+
+1. **Use HTTPS**: Always use HTTPS in production
+2. **Validate Scopes**: Request only the scopes needed for each operation
+3. **Rate Limiting**: Implement rate limiting on proxy endpoints
+4. **Input Validation**: Validate and sanitize all user inputs
+5. **Error Messages**: Don't expose sensitive information in error messages
+
+### Scope Configuration
+
+Follow the principle of least privilege when configuring scopes:
+
+```typescript lib/auth0.ts
+export const auth0 = new Auth0Client({
+  authorizationParameters: {
+    scope: {
+      // Minimal scopes for My Account API
+      [`https://${process.env.AUTH0_DOMAIN}/me/`]: "profile:read",
+
+      // Additional scopes only if needed
+      // "profile:write email:write phone:write"
+    }
+  }
+});
+```
+
+### Authentication Requirements
+
+<Warning>
+The proxy endpoints require an authenticated session. Unauthenticated requests will receive a `401 Unauthorized` response.
+</Warning>
+
+## Debugging
+
+Enable debug logging to troubleshoot proxy issues:
+
+```typescript app/api/debug-proxy/route.ts
+import { NextRequest, NextResponse } from "next/server";
+import { auth0 } from "@/lib/auth0";
+
+export async function GET(req: NextRequest) {
+  console.log("Proxy request:", {
+    url: req.url,
+    headers: Object.fromEntries(req.headers),
+    method: req.method
+  });
+
+  try {
+    // Attempt to get access token
+    const token = await auth0.getAccessToken({
+      audience: `https://${process.env.AUTH0_DOMAIN}/me/`,
+      scope: "profile:read"
+    });
+
+    console.log("Access token obtained:", {
+      expiresAt: token.expiresAt,
+      scope: token.scope,
+      hasToken: !!token.token
+    });
+
+    return NextResponse.json({ debug: "success" });
+  } catch (error) {
+    console.error("Proxy error:", error);
+    return NextResponse.json({ error: error.message }, { status: 500 });
+  }
+}
+```
+
+## Advanced Usage
+
+### Custom Headers
+
+Pass custom headers through the proxy:
+
+```typescript
+const response = await fetch("/me/v1/profile", {
+  headers: {
+    "scope": "profile:read",
+    "Accept-Language": "en-US",
+    "X-Custom-Header": "value"
+  }
+});
+```
+
+### Batch Requests
+
+Make multiple requests efficiently:
+
+```typescript
+const [profile, sessions, authenticators] = await Promise.all([
+  fetch("/me/v1/profile", {
+    headers: { "scope": "profile:read" }
+  }).then((r) => r.json()),
+
+  fetch("/me/v1/sessions", {
+    headers: { "scope": "session:read" }
+  }).then((r) => r.json()),
+
+  fetch("/me/v1/authenticators", {
+    headers: { "scope": "authenticator:read" }
+  }).then((r) => r.json())
+]);
+```
+
+### Pagination
+
+Handle paginated responses:
+
+```typescript
+async function fetchAllOrganizations() {
+  let allOrgs = [];
+  let url = "/my-org/organizations";
+
+  while (url) {
+    const response = await fetch(url, {
+      headers: { "scope": "org:read" }
+    });
+
+    const data = await response.json();
+    allOrgs = [...allOrgs, ...data.organizations];
+
+    // Check for next page
+    url = data.next ? `/my-org/organizations?cursor=${data.next}` : null;
+  }
+
+  return allOrgs;
+}
+```
+
+## API Reference
+
+For complete API documentation, see:
+
+- [My Account API Documentation](https://auth0.com/docs/api/my-account)
+- [My Organization API Documentation](https://auth0.com/docs/api/my-organization)
+
+## Limitations
+
+- Proxy endpoints require an active user session
+- DPoP is recommended but not required
+- Rate limits apply based on your Auth0 plan
+- Some endpoints may require additional tenant configuration
+
+## Further Reading
+
+- [Auth0 My Account API](https://auth0.com/docs/api/my-account)
+- [Auth0 My Organization API](https://auth0.com/docs/api/my-organization)
+- [DPoP Configuration](/advanced/dpop)
+- [Token Management Best Practices](/guides/token-management)

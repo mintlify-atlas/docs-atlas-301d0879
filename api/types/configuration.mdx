@@ -1,0 +1,458 @@
+---
+title: 'Configuration'
+description: 'Auth0Client configuration options for initializing the SDK'
+---
+
+## Overview
+
+The `Auth0ClientOptions` interface defines all configuration options available when creating an `Auth0Client` instance. These options control authentication behavior, session management, token handling, and security features.
+
+## Type Definition
+
+```typescript
+export interface Auth0ClientOptions {
+  // Authorization server configuration
+  domain?: string;
+  clientId?: string;
+  clientSecret?: string;
+  authorizationParameters?: AuthorizationParameters;
+  pushedAuthorizationRequests?: boolean;
+  clientAssertionSigningKey?: string | CryptoKey;
+  clientAssertionSigningAlg?: string;
+  
+  // Application configuration
+  appBaseUrl?: string | string[];
+  secret?: string;
+  signInReturnToPath?: string;
+  
+  // Session configuration
+  session?: SessionConfiguration;
+  
+  // Transaction cookie configuration
+  transactionCookie?: TransactionCookieOptions;
+  
+  // Logout configuration
+  logoutStrategy?: LogoutStrategy;
+  includeIdTokenHintInOIDCLogoutUrl?: boolean;
+  
+  // Hooks
+  beforeSessionSaved?: BeforeSessionSavedHook;
+  onCallback?: OnCallbackHook;
+  
+  // Session store
+  sessionStore?: SessionDataStore;
+  
+  // Routes
+  routes?: RoutesOptions;
+  
+  // Security and networking
+  allowInsecureRequests?: boolean;
+  httpTimeout?: number;
+  enableTelemetry?: boolean;
+  enableAccessTokenEndpoint?: boolean;
+  tokenRefreshBuffer?: number;
+  noContentProfileResponseWhenUnauthenticated?: boolean;
+  enableParallelTransactions?: boolean;
+  enableConnectAccountEndpoint?: boolean;
+  
+  // DPoP configuration
+  useDPoP?: boolean;
+  dpopKeyPair?: DpopKeyPair;
+  dpopOptions?: DpopOptions;
+  
+  // MFA configuration
+  mfaTokenTtl?: number;
+}
+```
+
+## Required Configuration
+
+These options must be provided either through the constructor or environment variables:
+
+<ResponseField name="domain" type="string">
+  The Auth0 domain for your tenant (e.g., `example.us.auth0.com`).
+  
+  **Environment variable**: `AUTH0_DOMAIN`
+</ResponseField>
+
+<ResponseField name="clientId" type="string">
+  The Auth0 application client ID.
+  
+  **Environment variable**: `AUTH0_CLIENT_ID`
+</ResponseField>
+
+<ResponseField name="clientSecret" type="string">
+  The Auth0 application client secret. Either this or `clientAssertionSigningKey` must be provided.
+  
+  **Environment variable**: `AUTH0_CLIENT_SECRET`
+</ResponseField>
+
+<ResponseField name="secret" type="string">
+  A 32-byte, hex-encoded secret used for encrypting session cookies.
+  
+  **Environment variable**: `AUTH0_SECRET`
+  
+  Generate with: `openssl rand -hex 32`
+</ResponseField>
+
+## Authorization Server Options
+
+<ResponseField name="authorizationParameters" type="AuthorizationParameters">
+  Additional parameters to send to the `/authorize` endpoint. See [AuthorizationParameters](#authorizationparameters) below.
+</ResponseField>
+
+<ResponseField name="pushedAuthorizationRequests" type="boolean" default={false}>
+  Enable Pushed Authorization Requests (PAR) for enhanced security.
+</ResponseField>
+
+<ResponseField name="clientAssertionSigningKey" type="string | CryptoKey">
+  Private key for use with `private_key_jwt` client authentication. Can be a PEM string or CryptoKey.
+  
+  **Environment variable**: `AUTH0_CLIENT_ASSERTION_SIGNING_KEY`
+</ResponseField>
+
+<ResponseField name="clientAssertionSigningAlg" type="string">
+  Algorithm used to sign client assertion JWT (e.g., "RS256", "ES256").
+  
+  **Environment variable**: `AUTH0_CLIENT_ASSERTION_SIGNING_ALG`
+</ResponseField>
+
+## Application Options
+
+<ResponseField name="appBaseUrl" type="string | string[]">
+  The base URL(s) of your application (e.g., `http://localhost:3000`).
+  
+  - **Single URL**: `"https://app.example.com"`
+  - **Multiple URLs**: `["https://app.example.com", "https://myapp.vercel.app"]`
+  - **Environment variable**: `APP_BASE_URL` (comma-separated for multiple)
+  
+  If not provided, the SDK infers from the request host at runtime.
+</ResponseField>
+
+<ResponseField name="signInReturnToPath" type="string" default="/">
+  Path to redirect users to after successful authentication.
+</ResponseField>
+
+## Session Options
+
+<ResponseField name="session" type="SessionConfiguration">
+  Configure session timeouts and behavior.
+  
+  ```typescript
+  interface SessionConfiguration {
+    rolling?: boolean;              // Default: true
+    absoluteDuration?: number;      // Default: 259200 (3 days)
+    inactivityDuration?: number;    // Default: 86400 (1 day)
+    cookie?: SessionCookieOptions;
+  }
+  ```
+  
+  <Expandable title="Session Cookie Options">
+    ```typescript
+    interface SessionCookieOptions {
+      name?: string;           // Default: "__session"
+      sameSite?: "strict" | "lax" | "none";  // Default: "lax"
+      secure?: boolean;        // Auto-detected from appBaseUrl
+      path?: string;           // Default: "/"
+      domain?: string;
+      transient?: boolean;     // Don't persist beyond session
+    }
+    ```
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="sessionStore" type="SessionDataStore">
+  Custom session store implementation for database-backed sessions.
+  
+  ```typescript
+  interface SessionDataStore {
+    get(id: string): Promise<SessionData | null>;
+    set(id: string, session: SessionData): Promise<void>;
+    delete(id: string): Promise<void>;
+    deleteByLogoutToken?(logoutToken: LogoutToken): Promise<void>;
+  }
+  ```
+</ResponseField>
+
+## Logout Options
+
+<ResponseField name="logoutStrategy" type="'auto' | 'oidc' | 'v2'" default="auto">
+  Logout endpoint selection strategy:
+  
+  - `auto` - Try OIDC RP-Initiated Logout, fallback to `/v2/logout`
+  - `oidc` - Always use OIDC RP-Initiated Logout
+  - `v2` - Always use Auth0 `/v2/logout` endpoint
+</ResponseField>
+
+<ResponseField name="includeIdTokenHintInOIDCLogoutUrl" type="boolean" default={true}>
+  Include `id_token_hint` parameter in OIDC logout URLs. Recommended for security.
+</ResponseField>
+
+## Hooks
+
+<ResponseField name="beforeSessionSaved" type="BeforeSessionSavedHook">
+  Callback to modify the session before it's persisted.
+  
+  ```typescript
+  type BeforeSessionSavedHook = (
+    session: SessionData,
+    idToken?: string
+  ) => SessionData | Promise<SessionData>;
+  ```
+  
+  **Example**:
+  ```typescript
+  beforeSessionSaved: async (session, idToken) => {
+    return {
+      ...session,
+      user: {
+        ...session.user,
+        customField: 'value'
+      }
+    };
+  }
+  ```
+</ResponseField>
+
+<ResponseField name="onCallback" type="OnCallbackHook">
+  Callback to handle post-authentication logic or customize redirects.
+  
+  ```typescript
+  type OnCallbackHook = (
+    context: OnCallbackContext
+  ) => void | { returnTo: string } | Promise<void | { returnTo: string }>;
+  ```
+  
+  **Example**:
+  ```typescript
+  onCallback: async (context) => {
+    const { session, request } = context;
+    
+    // Redirect to profile page for new users
+    if (session.user.isNewUser) {
+      return { returnTo: '/profile/setup' };
+    }
+  }
+  ```
+</ResponseField>
+
+## Token Options
+
+<ResponseField name="tokenRefreshBuffer" type="number" default={0}>
+  Number of seconds before token expiration to trigger automatic refresh.
+  
+  **Example**: With `tokenRefreshBuffer: 60`, tokens expiring within 60 seconds will be proactively refreshed.
+</ResponseField>
+
+<ResponseField name="enableAccessTokenEndpoint" type="boolean" default={true}>
+  Enable the `/auth/access-token` endpoint for client-side token access.
+  
+  <Warning>
+    Set to `false` for Token Mediating Backend pattern (recommended for most apps).
+  </Warning>
+</ResponseField>
+
+## DPoP Configuration
+
+<ResponseField name="useDPoP" type="boolean" default={false}>
+  Enable DPoP (Demonstrating Proof-of-Possession) for cryptographically bound tokens.
+  
+  **Example**:
+  ```typescript
+  import { generateKeyPair } from 'oauth4webapi';
+  
+  const dpopKeyPair = await generateKeyPair('ES256');
+  
+  const auth0 = new Auth0Client({
+    useDPoP: true,
+    dpopKeyPair
+  });
+  ```
+</ResponseField>
+
+<ResponseField name="dpopKeyPair" type="DpopKeyPair">
+  ES256 key pair for DPoP proof generation.
+  
+  ```typescript
+  interface DpopKeyPair {
+    publicKey: CryptoKey;
+    privateKey: CryptoKey;
+  }
+  ```
+  
+  Can be loaded from environment variables:
+  - `AUTH0_DPOP_PUBLIC_KEY`
+  - `AUTH0_DPOP_PRIVATE_KEY`
+</ResponseField>
+
+<ResponseField name="dpopOptions" type="DpopOptions">
+  DPoP timing and retry configuration.
+  
+  ```typescript
+  interface DpopOptions {
+    clockTolerance?: number;  // Clock skew tolerance (seconds)
+    clockSkew?: number;       // Clock adjustment (seconds)
+    retry?: {
+      delay?: number;         // Retry delay (ms)
+      jitter?: boolean;       // Add random jitter
+    };
+  }
+  ```
+</ResponseField>
+
+## MFA Configuration
+
+<ResponseField name="mfaTokenTtl" type="number" default={300}>
+  MFA context TTL in seconds. Controls how long encrypted `mfa_token` remains valid.
+  
+  **Environment variable**: `AUTH0_MFA_TOKEN_TTL`
+</ResponseField>
+
+## Route Configuration
+
+<ResponseField name="routes" type="RoutesOptions">
+  Customize authentication route paths.
+  
+  ```typescript
+  interface RoutesOptions {
+    login?: string;              // Default: "/auth/login"
+    logout?: string;             // Default: "/auth/logout"
+    callback?: string;           // Default: "/auth/callback"
+    profile?: string;            // Default: "/auth/profile"
+    accessToken?: string;        // Default: "/auth/access-token"
+    connectAccount?: string;     // Default: "/auth/connect"
+    backChannelLogout?: string;  // Default: "/auth/backchannel-logout"
+  }
+  ```
+  
+  Environment variables:
+  - `NEXT_PUBLIC_LOGIN_ROUTE`
+  - `NEXT_PUBLIC_PROFILE_ROUTE`
+  - `NEXT_PUBLIC_ACCESS_TOKEN_ROUTE`
+</ResponseField>
+
+<ResponseField name="enableConnectAccountEndpoint" type="boolean" default={false}>
+  Enable the `/auth/connect` endpoint for connecting additional accounts.
+</ResponseField>
+
+## Network and Security
+
+<ResponseField name="allowInsecureRequests" type="boolean" default={false}>
+  Allow HTTP requests to authorization server. Only for testing with mock OIDC providers. Cannot be used in production.
+</ResponseField>
+
+<ResponseField name="httpTimeout" type="number" default={5000}>
+  HTTP timeout in milliseconds for authentication requests.
+</ResponseField>
+
+<ResponseField name="enableTelemetry" type="boolean" default={true}>
+  Send library name and version to Auth0 via `Auth0-Client` header.
+</ResponseField>
+
+<ResponseField name="enableParallelTransactions" type="boolean" default={true}>
+  Allow multiple concurrent authentication transactions.
+</ResponseField>
+
+<ResponseField name="noContentProfileResponseWhenUnauthenticated" type="boolean" default={false}>
+  Return 204 No Content instead of 401 Unauthorized for unauthenticated profile endpoint requests.
+</ResponseField>
+
+## AuthorizationParameters
+
+```typescript
+export interface AuthorizationParameters {
+  scope?: string | null;
+  audience?: string | null;
+  redirect_uri?: string | null;
+  max_age?: number;
+  organization?: string;
+  [key: string]: unknown;
+}
+```
+
+<ResponseField name="scope" type="string" default="openid profile email offline_access">
+  OAuth scopes to request. Space-delimited string.
+</ResponseField>
+
+<ResponseField name="audience" type="string">
+  API identifier for the target resource server.
+</ResponseField>
+
+<ResponseField name="redirect_uri" type="string">
+  Override the redirect URI for the callback.
+</ResponseField>
+
+<ResponseField name="max_age" type="number">
+  Maximum authentication age in seconds. Forces re-authentication if exceeded.
+</ResponseField>
+
+<ResponseField name="organization" type="string">
+  Organization ID for organization-specific login.
+</ResponseField>
+
+## Usage Example
+
+```typescript
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+import { generateKeyPair } from 'oauth4webapi';
+
+const dpopKeyPair = await generateKeyPair('ES256');
+
+export const auth0 = new Auth0Client({
+  // Required (or via env vars)
+  domain: 'example.us.auth0.com',
+  clientId: 'abc123',
+  clientSecret: 'secret123',
+  secret: '0123456789abcdef0123456789abcdef',
+  appBaseUrl: 'https://myapp.com',
+  
+  // Authorization
+  authorizationParameters: {
+    scope: 'openid profile email offline_access',
+    audience: 'https://api.example.com'
+  },
+  
+  // Session
+  session: {
+    rolling: true,
+    absoluteDuration: 7 * 24 * 60 * 60, // 7 days
+    inactivityDuration: 24 * 60 * 60,   // 1 day
+    cookie: {
+      name: 'app_session',
+      sameSite: 'lax',
+      secure: true
+    }
+  },
+  
+  // Token management
+  tokenRefreshBuffer: 60,
+  enableAccessTokenEndpoint: false,
+  
+  // DPoP
+  useDPoP: true,
+  dpopKeyPair,
+  
+  // Hooks
+  beforeSessionSaved: async (session) => {
+    return {
+      ...session,
+      user: {
+        ...session.user,
+        displayName: session.user.name || session.user.email
+      }
+    };
+  },
+  
+  // Routes
+  routes: {
+    login: '/api/auth/login',
+    callback: '/api/auth/callback'
+  }
+});
+```
+
+## See Also
+
+- [SessionData](/api/types/session-data) - Session data structure
+- [User](/api/types/user) - User profile interface
+- [TokenSet](/api/types/token-set) - Token structure

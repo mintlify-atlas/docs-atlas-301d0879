@@ -1,0 +1,153 @@
+---
+title: Server API Overview
+description: Server-side authentication methods for Next.js applications
+---
+
+The Auth0 Next.js SDK provides a comprehensive server-side API for handling authentication in both the App Router and Pages Router.
+
+## Installation
+
+Import the server API from the dedicated server package:
+
+```typescript
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+```
+
+## Auth0Client Instance
+
+Create a single instance of `Auth0Client` to use throughout your application:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+export const auth0 = new Auth0Client({
+  domain: process.env.AUTH0_DOMAIN,
+  clientId: process.env.AUTH0_CLIENT_ID,
+  clientSecret: process.env.AUTH0_CLIENT_SECRET,
+  secret: process.env.AUTH0_SECRET,
+  appBaseUrl: process.env.APP_BASE_URL
+});
+```
+
+## Core Methods
+
+### Session Management
+
+<CardGroup cols={2}>
+  <Card title="getSession" icon="id-card" href="/server/get-session">
+    Retrieve the current user's session data
+  </Card>
+  <Card title="updateSession" icon="pen-to-square" href="/server/update-session">
+    Update session data for authenticated users
+  </Card>
+</CardGroup>
+
+### Token Management
+
+<CardGroup cols={2}>
+  <Card title="getAccessToken" icon="key" href="/server/get-access-token">
+    Get access tokens with automatic refresh
+  </Card>
+  <Card title="Session Stores" icon="database" href="/server/session-stores">
+    Configure stateless or stateful session storage
+  </Card>
+</CardGroup>
+
+### Route Protection
+
+<CardGroup cols={1}>
+  <Card title="withPageAuthRequired" icon="shield" href="/server/with-page-auth-required">
+    Protect pages and redirect unauthenticated users
+  </Card>
+</CardGroup>
+
+## App Router vs Pages Router
+
+The SDK provides different method signatures depending on your Next.js routing strategy:
+
+<CodeGroup>
+```typescript App Router
+// Server Components, Route Handlers, Server Actions
+import { auth0 } from '@/lib/auth0';
+
+export default async function Page() {
+  const session = await auth0.getSession();
+  const { token } = await auth0.getAccessToken();
+  
+  return <div>Welcome {session?.user.name}</div>;
+}
+```
+
+```typescript Pages Router
+// getServerSideProps, API Routes
+import { auth0 } from '@/lib/auth0';
+import type { GetServerSideProps } from 'next';
+
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const session = await auth0.getSession(ctx.req);
+  const { token } = await auth0.getAccessToken(ctx.req, ctx.res);
+  
+  return { props: { user: session?.user } };
+};
+```
+
+```typescript Middleware
+// middleware.ts
+import { NextRequest } from 'next/server';
+import { auth0 } from '@/lib/auth0';
+
+export async function middleware(request: NextRequest) {
+  const authRes = await auth0.middleware(request);
+  const session = await auth0.getSession(request);
+  
+  return authRes;
+}
+```
+</CodeGroup>
+
+## Router Compatibility
+
+| Method | App Router | Pages Router | Middleware |
+|--------|-----------|--------------|------------|
+| `getSession()` | ✅ No args | ✅ `(req)` | ✅ `(req)` |
+| `getAccessToken()` | ✅ `(options?)` | ✅ `(req, res, options?)` | ✅ `(req, res, options?)` |
+| `updateSession()` | ✅ `(session)` | ✅ `(req, res, session)` | ✅ `(req, res, session)` |
+| `withPageAuthRequired()` | ✅ Supported | ✅ Supported | ❌ N/A |
+
+## Environment Variables
+
+The SDK requires the following environment variables:
+
+<ParamField path="AUTH0_DOMAIN" type="string" required>
+  Your Auth0 tenant domain (e.g., `example.us.auth0.com`)
+</ParamField>
+
+<ParamField path="AUTH0_CLIENT_ID" type="string" required>
+  Your Auth0 application client ID
+</ParamField>
+
+<ParamField path="AUTH0_CLIENT_SECRET" type="string" required>
+  Your Auth0 application client secret
+</ParamField>
+
+<ParamField path="AUTH0_SECRET" type="string" required>
+  A 32-byte hex-encoded secret for encrypting cookies. Generate with:
+  ```bash
+  openssl rand -hex 32
+  ```
+</ParamField>
+
+<ParamField path="APP_BASE_URL" type="string">
+  Your application's base URL (e.g., `http://localhost:3000`). If omitted, the SDK infers it from the request host at runtime.
+</ParamField>
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="Auth0Client Configuration" icon="gear" href="/server/auth0-client">
+    Learn about all constructor options
+  </Card>
+  <Card title="Session Data" icon="folder" href="/api-reference/session-data">
+    Understand the session structure
+  </Card>
+</CardGroup>

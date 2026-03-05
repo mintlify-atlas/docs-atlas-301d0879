@@ -1,0 +1,425 @@
+---
+title: withPageAuthRequired
+description: Protect pages and redirect unauthenticated users
+---
+
+The `withPageAuthRequired` helper protects pages by checking for an active session and redirecting unauthenticated users to the login page.
+
+## Usage
+
+The helper works differently for App Router and Pages Router:
+
+<CodeGroup>
+```typescript App Router
+// Server Component protection
+auth0.withPageAuthRequired(
+  async function Page() { ... },
+  options?: WithPageAuthRequiredAppRouterOptions
+)
+```
+
+```typescript Pages Router
+// getServerSideProps protection
+auth0.withPageAuthRequired(
+  options?: WithPageAuthRequiredPageRouterOptions
+)
+```
+</CodeGroup>
+
+## App Router
+
+### Server Components
+
+Wrap your Server Component to protect it:
+
+```typescript app/dashboard/page.tsx
+import { auth0 } from '@/lib/auth0';
+
+export default auth0.withPageAuthRequired(
+  async function Dashboard() {
+    const session = await auth0.getSession();
+
+    return (
+      <div>
+        <h1>Dashboard</h1>
+        <p>Welcome, {session!.user.name}!</p>
+      </div>
+    );
+  },
+  { returnTo: '/dashboard' }
+);
+```
+
+<Warning>
+  You must provide the `returnTo` option for Server Components since they cannot access the URL pathname.
+</Warning>
+
+### App Router Options
+
+<ParamField path="returnTo" type="string" required>
+  The path to return to after successful authentication.
+  
+  ```typescript
+  { returnTo: '/dashboard' }
+  ```
+</ParamField>
+
+<ParamField path="loginUrl" type="string" default="/auth/login">
+  Custom login URL to redirect unauthenticated users.
+</ParamField>
+
+### Complete App Router Example
+
+```typescript app/protected/page.tsx
+import { auth0 } from '@/lib/auth0';
+
+export default auth0.withPageAuthRequired(
+  async function ProtectedPage() {
+    const session = await auth0.getSession();
+    const { token } = await auth0.getAccessToken();
+
+    // Fetch protected data
+    const response = await fetch('https://api.example.com/data', {
+      headers: {
+        Authorization: `Bearer ${token}`
+      }
+    });
+
+    const data = await response.json();
+
+    return (
+      <div>
+        <h1>Protected Page</h1>
+        <p>User: {session!.user.email}</p>
+        <pre>{JSON.stringify(data, null, 2)}</pre>
+      </div>
+    );
+  },
+  { 
+    returnTo: '/protected',
+    loginUrl: '/custom-login'
+  }
+);
+```
+
+## Pages Router
+
+### getServerSideProps Protection
+
+Wrap `getServerSideProps` to protect a page:
+
+```typescript pages/dashboard.tsx
+import { auth0 } from '@/lib/auth0';
+import type { InferGetServerSidePropsType } from 'next';
+
+export const getServerSideProps = auth0.withPageAuthRequired();
+
+export default function Dashboard({
+  user
+}: InferGetServerSidePropsType<typeof getServerSideProps>) {
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>Welcome, {user.name}!</p>
+    </div>
+  );
+}
+```
+
+### Custom getServerSideProps
+
+Pass your own `getServerSideProps` function:
+
+```typescript pages/profile.tsx
+import { auth0 } from '@/lib/auth0';
+import type { GetServerSideProps, InferGetServerSidePropsType } from 'next';
+
+type Props = {
+  user: any;
+  profile: any;
+};
+
+export const getServerSideProps = auth0.withPageAuthRequired<Props>({
+  async getServerSideProps(ctx) {
+    const session = await auth0.getSession(ctx.req);
+    
+    // Fetch additional data
+    const profile = await fetchUserProfile(session!.user.sub);
+
+    return {
+      props: {
+        profile
+      }
+    };
+  }
+});
+
+export default function Profile({
+  user,
+  profile
+}: InferGetServerSidePropsType<typeof getServerSideProps>) {
+  return (
+    <div>
+      <h1>Profile</h1>
+      <p>Name: {user.name}</p>
+      <p>Bio: {profile.bio}</p>
+    </div>
+  );
+}
+```
+
+### Pages Router Options
+
+<ParamField path="returnTo" type="string">
+  The path to return to after authentication. Defaults to the current page.
+</ParamField>
+
+<ParamField path="getServerSideProps" type="function">
+  Your custom `getServerSideProps` function. Props are merged with the `user` prop.
+  
+  ```typescript
+  {
+    async getServerSideProps(ctx) {
+      return {
+        props: {
+          customData: 'value'
+        }
+      };
+    }
+  }
+  ```
+</ParamField>
+
+### Complete Pages Router Example
+
+```typescript pages/admin.tsx
+import { auth0 } from '@/lib/auth0';
+import type { GetServerSideProps, InferGetServerSidePropsType } from 'next';
+
+type Props = {
+  user: any;
+  isAdmin: boolean;
+};
+
+export const getServerSideProps = auth0.withPageAuthRequired<Props>({
+  async getServerSideProps(ctx) {
+    const session = await auth0.getSession(ctx.req);
+    
+    // Check admin role
+    const isAdmin = session!.user['https://example.com/roles']?.includes('admin');
+
+    if (!isAdmin) {
+      return {
+        redirect: {
+          destination: '/unauthorized',
+          permanent: false
+        }
+      };
+    }
+
+    return {
+      props: {
+        isAdmin
+      }
+    };
+  }
+});
+
+export default function Admin({
+  user,
+  isAdmin
+}: InferGetServerSidePropsType<typeof getServerSideProps>) {
+  return (
+    <div>
+      <h1>Admin Panel</h1>
+      <p>Welcome, {user.name}</p>
+    </div>
+  );
+}
+```
+
+## Client-Side Protection
+
+For Client Components, use the client-side helper:
+
+```typescript app/profile/page.tsx
+'use client';
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0/client';
+
+export default withPageAuthRequired(function Profile({ user }) {
+  return (
+    <div>
+      <h1>Profile</h1>
+      <p>Welcome, {user.name}</p>
+    </div>
+  );
+});
+```
+
+<Note>
+  The client-side helper uses the `useUser()` hook and redirects to login if no user is found.
+</Note>
+
+## Redirect Behavior
+
+### Default Redirect
+
+Unauthenticated users are redirected to `/auth/login` with a `returnTo` parameter:
+
+```
+/auth/login?returnTo=/dashboard
+```
+
+After login, users are redirected back to the original page.
+
+### Custom Login URL
+
+Specify a custom login URL:
+
+```typescript
+auth0.withPageAuthRequired(
+  async function Page() { ... },
+  { 
+    returnTo: '/page',
+    loginUrl: '/custom-login'
+  }
+);
+```
+
+### Conditional Redirects
+
+Implement custom logic in `getServerSideProps`:
+
+```typescript
+export const getServerSideProps = auth0.withPageAuthRequired({
+  async getServerSideProps(ctx) {
+    const session = await auth0.getSession(ctx.req);
+    
+    // Redirect based on user role
+    if (!session!.user.email_verified) {
+      return {
+        redirect: {
+          destination: '/verify-email',
+          permanent: false
+        }
+      };
+    }
+
+    return { props: {} };
+  }
+});
+```
+
+## Error Handling
+
+Handle authentication errors:
+
+```typescript
+export const getServerSideProps = auth0.withPageAuthRequired({
+  async getServerSideProps(ctx) {
+    try {
+      const session = await auth0.getSession(ctx.req);
+      // Fetch data...
+    } catch (error) {
+      console.error('Error:', error);
+      return {
+        redirect: {
+          destination: '/error',
+          permanent: false
+        }
+      };
+    }
+
+    return { props: {} };
+  }
+});
+```
+
+## Router Comparison
+
+| Feature | App Router | Pages Router |
+|---------|-----------|-------------|
+| Protection level | Server Component | getServerSideProps |
+| Syntax | Wrap component | Wrap getServerSideProps |
+| `returnTo` required | ✅ Yes | ❌ No (inferred) |
+| Custom props merge | ❌ N/A | ✅ Yes |
+| Type safety | ✅ Full | ✅ Full |
+
+## Common Patterns
+
+### Role-Based Access
+
+```typescript
+export const getServerSideProps = auth0.withPageAuthRequired({
+  async getServerSideProps(ctx) {
+    const session = await auth0.getSession(ctx.req);
+    const roles = session!.user['https://example.com/roles'] || [];
+
+    if (!roles.includes('admin')) {
+      return {
+        redirect: {
+          destination: '/unauthorized',
+          permanent: false
+        }
+      };
+    }
+
+    return { props: {} };
+  }
+});
+```
+
+### Organization Validation
+
+```typescript
+export const getServerSideProps = auth0.withPageAuthRequired({
+  async getServerSideProps(ctx) {
+    const session = await auth0.getSession(ctx.req);
+    const orgId = session!.user.org_id;
+
+    if (orgId !== 'org_expected') {
+      return {
+        redirect: {
+          destination: '/wrong-organization',
+          permanent: false
+        }
+      };
+    }
+
+    return { props: {} };
+  }
+});
+```
+
+### Email Verification Check
+
+```typescript
+export const getServerSideProps = auth0.withPageAuthRequired({
+  async getServerSideProps(ctx) {
+    const session = await auth0.getSession(ctx.req);
+
+    if (!session!.user.email_verified) {
+      return {
+        redirect: {
+          destination: '/verify-email',
+          permanent: false
+        }
+      };
+    }
+
+    return { props: {} };
+  }
+});
+```
+
+## Related Methods
+
+<CardGroup cols={2}>
+  <Card title="getSession" icon="id-card" href="/server/get-session">
+    Retrieve session data
+  </Card>
+  <Card title="withApiAuthRequired" icon="shield" href="/api-reference/with-api-auth-required">
+    Protect API routes
+  </Card>
+</CardGroup>

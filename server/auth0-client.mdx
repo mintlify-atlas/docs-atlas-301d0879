@@ -1,0 +1,392 @@
+---
+title: Auth0Client
+description: Configure the Auth0 client for server-side authentication
+---
+
+The `Auth0Client` class is the main entry point for server-side authentication in your Next.js application.
+
+## Constructor
+
+```typescript
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+const auth0 = new Auth0Client(options);
+```
+
+## Configuration Options
+
+### Required Options
+
+These options can be provided via constructor or environment variables:
+
+<ParamField path="domain" type="string">
+  The Auth0 domain for your tenant (e.g., `example.us.auth0.com`).
+  
+  **Environment variable:** `AUTH0_DOMAIN`
+</ParamField>
+
+<ParamField path="clientId" type="string">
+  The Auth0 client ID for your application.
+  
+  **Environment variable:** `AUTH0_CLIENT_ID`
+</ParamField>
+
+<ParamField path="clientSecret" type="string">
+  The Auth0 client secret for your application.
+  
+  **Environment variable:** `AUTH0_CLIENT_SECRET`
+  
+  <Note>Either `clientSecret` or `clientAssertionSigningKey` must be provided.</Note>
+</ParamField>
+
+<ParamField path="secret" type="string">
+  A 32-byte, hex-encoded secret used for encrypting cookies.
+  
+  **Environment variable:** `AUTH0_SECRET`
+  
+  Generate with:
+  ```bash
+  openssl rand -hex 32
+  ```
+</ParamField>
+
+### Application Configuration
+
+<ParamField path="appBaseUrl" type="string | string[]">
+  The URL of your application (e.g., `http://localhost:3000`).
+  
+  Can be a single URL string, or an array of allowed base URLs for multi-domain deployments.
+  
+  **Environment variable:** `APP_BASE_URL` (comma-separated for multiple origins)
+  
+  If omitted, the SDK infers the base URL from the request host at runtime.
+</ParamField>
+
+<ParamField path="signInReturnToPath" type="string" default="/">
+  The path to redirect users to after successful authentication.
+</ParamField>
+
+### Authorization Parameters
+
+<ParamField path="authorizationParameters" type="object">
+  Additional parameters sent to the `/authorize` endpoint.
+  
+  ```typescript
+  authorizationParameters: {
+    scope: 'openid profile email',
+    audience: 'https://api.example.com'
+  }
+  ```
+  
+  Common parameters:
+  - `scope`: OAuth scopes to request
+  - `audience`: API identifier for access token
+  - `connection`: Specific connection to use
+  - `prompt`: Force authentication prompt
+</ParamField>
+
+<ParamField path="pushedAuthorizationRequests" type="boolean" default={false}>
+  Enable Pushed Authorization Requests (PAR) for enhanced security.
+</ParamField>
+
+### Session Configuration
+
+<ParamField path="session" type="SessionConfiguration">
+  Configure session timeouts and rolling behavior.
+  
+  ```typescript
+  session: {
+    rolling: true,
+    absoluteDuration: 60 * 60 * 24 * 7, // 7 days
+    inactivityDuration: 60 * 60 * 24,   // 1 day
+    cookie: {
+      name: '__session',
+      secure: true,
+      sameSite: 'lax',
+      path: '/',
+      domain: '.example.com',
+      transient: false
+    }
+  }
+  ```
+  
+  <Accordion title="Session Options">
+    - `rolling` (boolean, default: `true`): Enable rolling sessions
+    - `absoluteDuration` (number, default: 259200): Absolute session lifetime in seconds (3 days)
+    - `inactivityDuration` (number, default: 86400): Inactivity timeout in seconds (1 day)
+    - `cookie.name` (string, default: `__session`): Cookie name
+    - `cookie.secure` (boolean): Force HTTPS-only cookies
+    - `cookie.sameSite` ('lax' | 'strict' | 'none', default: 'lax')
+    - `cookie.path` (string, default: '/')
+    - `cookie.domain` (string): Cookie domain
+    - `cookie.transient` (boolean, default: false): Session-only cookie
+  </Accordion>
+</ParamField>
+
+<ParamField path="sessionStore" type="SessionDataStore">
+  Custom session store implementation for database-backed sessions.
+  
+  See [Session Stores](/server/session-stores) for implementation details.
+</ParamField>
+
+### Logout Configuration
+
+<ParamField path="logoutStrategy" type="'auto' | 'oidc' | 'v2'" default="auto">
+  Strategy for logout endpoint selection:
+  
+  - `auto`: Uses OIDC logout when available, falls back to `/v2/logout`
+  - `oidc`: Always uses OIDC RP-Initiated Logout
+  - `v2`: Always uses Auth0's `/v2/logout` endpoint (supports wildcards)
+</ParamField>
+
+<ParamField path="includeIdTokenHintInOIDCLogoutUrl" type="boolean" default={true}>
+  Include `id_token_hint` parameter in OIDC logout URLs.
+  
+  <Warning>
+    When set to `false`, logout requests lose cryptographic verification. Only disable if privacy requirements outweigh DoS protection concerns.
+  </Warning>
+</ParamField>
+
+### Token Configuration
+
+<ParamField path="tokenRefreshBuffer" type="number" default={0}>
+  Number of seconds to refresh access tokens early before expiration.
+  
+  ```typescript
+  tokenRefreshBuffer: 60 // Refresh tokens 60 seconds before expiry
+  ```
+</ParamField>
+
+<ParamField path="enableAccessTokenEndpoint" type="boolean" default={true}>
+  Enable the `/auth/access-token` endpoint for client-side token access.
+  
+  <Note>
+    Set to `false` for Token Mediating Backend pattern where clients don't need direct token access.
+  </Note>
+</ParamField>
+
+### Hooks
+
+<ParamField path="beforeSessionSaved" type="function">
+  Manipulate the session before persisting it.
+  
+  ```typescript
+  beforeSessionSaved: async (session) => {
+    // Remove sensitive claims
+    delete session.user.phone_number;
+    return session;
+  }
+  ```
+</ParamField>
+
+<ParamField path="onCallback" type="function">
+  Handle errors or manage redirects after authentication callback.
+  
+  ```typescript
+  onCallback: async (req, session) => {
+    // Custom redirect logic
+    return session.user.isAdmin ? '/admin' : '/dashboard';
+  }
+  ```
+</ParamField>
+
+### Advanced Options
+
+<ParamField path="clientAssertionSigningKey" type="string | CryptoKey">
+  Private key for `private_key_jwt` client authentication.
+  
+  **Environment variable:** `AUTH0_CLIENT_ASSERTION_SIGNING_KEY`
+</ParamField>
+
+<ParamField path="clientAssertionSigningAlg" type="string">
+  Algorithm for signing client assertion JWT.
+  
+  **Environment variable:** `AUTH0_CLIENT_ASSERTION_SIGNING_ALG`
+</ParamField>
+
+<ParamField path="routes" type="RoutesOptions">
+  Customize authentication route paths.
+  
+  ```typescript
+  routes: {
+    login: '/api/auth/login',
+    callback: '/api/auth/callback',
+    logout: '/api/auth/logout'
+  }
+  ```
+</ParamField>
+
+<ParamField path="httpTimeout" type="number" default={5000}>
+  HTTP timeout in milliseconds for authentication requests.
+</ParamField>
+
+<ParamField path="enableTelemetry" type="boolean" default={true}>
+  Send SDK name and version via `Auth0-Client` header.
+</ParamField>
+
+<ParamField path="allowInsecureRequests" type="boolean" default={false}>
+  Allow HTTP requests to authorization server (development only).
+  
+  <Warning>
+    Only works when `NODE_ENV` is not `production`.
+  </Warning>
+</ParamField>
+
+<ParamField path="noContentProfileResponseWhenUnauthenticated" type="boolean" default={false}>
+  Return `204 No Content` instead of `401 Unauthorized` from `/auth/profile` when unauthenticated.
+</ParamField>
+
+<ParamField path="enableConnectAccountEndpoint" type="boolean" default={false}>
+  Enable the `/auth/connect` endpoint for connecting additional accounts.
+</ParamField>
+
+### Transaction Cookie Configuration
+
+<ParamField path="transactionCookie" type="TransactionCookieOptions">
+  Configure transaction cookie for authentication flows.
+  
+  ```typescript
+  transactionCookie: {
+    prefix: '__txn_',
+    secure: true,
+    sameSite: 'lax',
+    path: '/',
+    maxAge: 3600
+  }
+  ```
+</ParamField>
+
+<ParamField path="enableParallelTransactions" type="boolean" default={true}>
+  Support multiple concurrent authentication flows with unique transaction cookies.
+</ParamField>
+
+### DPoP Configuration
+
+<ParamField path="useDPoP" type="boolean" default={false}>
+  Enable DPoP (Demonstrating Proof-of-Possession) for enhanced OAuth 2.0 security.
+  
+  Requires ES256 key pair via `dpopKeyPair` or environment variables.
+</ParamField>
+
+<ParamField path="dpopKeyPair" type="DpopKeyPair">
+  ES256 key pair for DPoP proof generation.
+  
+  ```typescript
+  import { generateKeyPair } from 'oauth4webapi';
+  
+  const dpopKeyPair = await generateKeyPair('ES256');
+  
+  const auth0 = new Auth0Client({
+    useDPoP: true,
+    dpopKeyPair
+  });
+  ```
+  
+  **Environment variables:**
+  - `AUTH0_DPOP_PUBLIC_KEY`: PEM-encoded public key
+  - `AUTH0_DPOP_PRIVATE_KEY`: PEM-encoded private key
+</ParamField>
+
+<ParamField path="dpopOptions" type="DpopOptions">
+  Configure DPoP timing validation and retry behavior.
+  
+  ```typescript
+  dpopOptions: {
+    clockTolerance: 60,
+    clockSkew: 0,
+    retry: {
+      delay: 200,
+      jitter: true
+    }
+  }
+  ```
+</ParamField>
+
+### MFA Configuration
+
+<ParamField path="mfaTokenTtl" type="number" default={300}>
+  MFA context TTL in seconds (5 minutes by default).
+  
+  **Environment variable:** `AUTH0_MFA_TOKEN_TTL`
+</ParamField>
+
+## Example Configurations
+
+<CodeGroup>
+```typescript Basic Configuration
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+export const auth0 = new Auth0Client({
+  domain: process.env.AUTH0_DOMAIN!,
+  clientId: process.env.AUTH0_CLIENT_ID!,
+  clientSecret: process.env.AUTH0_CLIENT_SECRET!,
+  secret: process.env.AUTH0_SECRET!,
+  appBaseUrl: process.env.APP_BASE_URL,
+  authorizationParameters: {
+    scope: 'openid profile email',
+    audience: 'https://api.example.com'
+  }
+});
+```
+
+```typescript With Session Store
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+import { RedisStore } from './redis-store';
+
+export const auth0 = new Auth0Client({
+  sessionStore: new RedisStore(),
+  session: {
+    rolling: true,
+    absoluteDuration: 60 * 60 * 24 * 7 // 7 days
+  }
+});
+```
+
+```typescript With DPoP
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+import { generateKeyPair } from 'oauth4webapi';
+
+const dpopKeyPair = await generateKeyPair('ES256');
+
+export const auth0 = new Auth0Client({
+  useDPoP: true,
+  dpopKeyPair,
+  dpopOptions: {
+    clockTolerance: 30
+  }
+});
+```
+
+```typescript Multi-Tenant
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+export const auth0 = new Auth0Client({
+  appBaseUrl: [
+    'https://app.example.com',
+    'https://preview.example.com'
+  ],
+  authorizationParameters: {
+    scope: 'openid profile email'
+  }
+});
+```
+</CodeGroup>
+
+## Methods
+
+See the following pages for detailed method documentation:
+
+<CardGroup cols={2}>
+  <Card title="getSession" icon="id-card" href="/server/get-session">
+    Retrieve session data
+  </Card>
+  <Card title="getAccessToken" icon="key" href="/server/get-access-token">
+    Get access tokens
+  </Card>
+  <Card title="updateSession" icon="pen-to-square" href="/server/update-session">
+    Update session data
+  </Card>
+  <Card title="withPageAuthRequired" icon="shield" href="/server/with-page-auth-required">
+    Protect pages
+  </Card>
+</CardGroup>

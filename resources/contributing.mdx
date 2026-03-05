@@ -1,0 +1,415 @@
+---
+title: Contributing
+description: Guidelines for contributing to the Auth0 Next.js SDK
+---
+
+We appreciate feedback and contributions to the Auth0 Next.js SDK. Before you get started, please review the following guidelines.
+
+## Code of Conduct
+
+This project adheres to the [Contributor Covenant Code of Conduct](https://github.com/auth0/nextjs-auth0/blob/main/CODE-OF-CONDUCT.md). By participating, you are expected to uphold this code.
+
+Our [company values](https://auth0.com/careers/culture) guide us in our day-to-day interactions and decision-making. Trust, respect, collaboration, and transparency are core values we believe should live and breathe within our projects.
+
+### Our Standards
+
+**Positive behaviors:**
+- Using welcoming and inclusive language
+- Being respectful of differing viewpoints and experiences
+- Gracefully accepting constructive criticism
+- Attempting collaboration before conflict
+- Focusing on what is best for the community
+- Showing empathy towards other community members
+
+**Unacceptable behaviors:**
+- Violence, threats of violence, or inciting self-harm
+- Sexualized language or imagery and unwelcome sexual attention
+- Trolling, spreading misinformation, insulting/derogatory comments
+- Public or private harassment
+- Publishing others' private information without permission
+- Abuse of the reporting process
+- Other conduct inappropriate in a professional setting
+
+### Reporting Issues
+
+Instances of unacceptable behavior may be reported anonymously through [this form](https://goo.gl/forms/chVYUnA4bP70WGsL2). All complaints will be reviewed and investigated.
+
+If you are unsure whether an incident is a violation, **we encourage you to report it anyway**. We would prefer extra reports over letting incidents go unnoticed.
+
+## Getting Started
+
+### Prerequisites
+
+- **Node.js:** Version 20 LTS or newer
+- **pnpm:** Package manager (install via `npm install -g pnpm`)
+- **Git:** Version control
+
+### Environment Setup
+
+1. **Fork the repository**
+   
+   Fork [auth0/nextjs-auth0](https://github.com/auth0/nextjs-auth0) to your GitHub account.
+
+2. **Clone your fork**
+   
+   ```bash
+   git clone https://github.com/YOUR_USERNAME/nextjs-auth0.git
+   cd nextjs-auth0
+   ```
+
+3. **Install dependencies**
+   
+   ```bash
+   pnpm install
+   ```
+
+4. **Create a branch**
+   
+   ```bash
+   git checkout -b feature/my-feature
+   ```
+
+## Development Workflow
+
+### Available Commands
+
+| Command | Description |
+|---------|-------------|
+| `pnpm install` | Install dependencies |
+| `pnpm run build` | Build the project |
+| `pnpm run build:watch` | Watch for changes and rebuild |
+| `pnpm test:unit` | Run unit tests |
+| `pnpm run test:coverage` | Run unit tests with coverage |
+| `pnpm run test:e2e` | Run E2E tests (requires `TEST_USER_PASSWORD` env var) |
+| `pnpm run lint` | Lint and typecheck |
+| `pnpm run lint:fix` | Fix linting issues |
+| `pnpm run docs` | Generate API documentation |
+
+### Building the Project
+
+```bash
+pnpm run build
+```
+
+This compiles TypeScript source files in `src/` to JavaScript in `dist/`.
+
+**Watch mode for development:**
+
+```bash
+pnpm run build:watch
+```
+
+### Running Tests
+
+**Unit tests:**
+
+```bash
+pnpm test:unit
+```
+
+Unit tests are co-located with source files (`*.test.ts`) in `src/`.
+
+**Test coverage:**
+
+```bash
+pnpm run test:coverage
+```
+
+**End-to-end tests:**
+
+```bash
+# Set up Auth0 test credentials
+export TEST_USER_PASSWORD=your-test-password
+
+pnpm run test:e2e
+```
+
+**Flow tests:**
+
+Black-box integration tests (`*.flow.test.ts`) use MSW to mock HTTP requests. No other mocks unless required.
+
+### Linting and Type Checking
+
+```bash
+pnpm run lint
+```
+
+Fix issues automatically:
+
+```bash
+pnpm run lint:fix
+```
+
+### Generating Documentation
+
+```bash
+pnpm run docs
+```
+
+Serve documentation locally:
+
+```bash
+npx http-server docs
+```
+
+## Project Structure
+
+```
+src/
+├── client/           # React hooks, Auth0Provider, client getAccessToken
+│   ├── hooks/        # useUser
+│   ├── helpers/      # getAccessToken, withPageAuthRequired
+│   └── providers/    # Auth0Provider
+├── server/           # Auth0Client (public API), AuthClient (internal)
+│   ├── session/      # Stateless (cookie) + Stateful (external store)
+│   ├── helpers/      # withPageAuthRequired, withApiAuthRequired
+│   ├── client.ts     # Auth0Client - main public class
+│   └── auth-client.ts # Internal route handling + OAuth flows
+├── errors/           # SdkError hierarchy (catch by error.code)
+├── types/            # SessionData, User, TokenSet, AuthorizationParameters
+├── utils/            # Internal: dpop, paths, scopes, urls
+└── testing/          # generateSessionCookie for test session setup
+```
+
+## Making Changes
+
+### Coding Standards
+
+- **TypeScript:** Use TypeScript for all source files
+- **Formatting:** Code is automatically formatted with Prettier
+- **Linting:** Follow ESLint rules
+- **Tests:** Write tests for new features and bug fixes
+- **Documentation:** Update documentation for API changes
+
+### Commit Messages
+
+Use clear, descriptive commit messages:
+
+```
+feat: add support for custom transaction cookies
+
+fix: resolve state validation error with parallel auth flows
+
+docs: update configuration options table
+
+test: add flow tests for DPoP key generation
+```
+
+**Conventional commit types:**
+- `feat`: New feature
+- `fix`: Bug fix
+- `docs`: Documentation changes
+- `test`: Test changes
+- `refactor`: Code refactoring
+- `chore`: Build/tooling changes
+
+### Testing Guidelines
+
+**Unit tests:**
+- Test individual functions and classes
+- Mock external dependencies
+- Co-locate tests with source files (`*.test.ts`)
+
+**Flow tests:**
+- Test end-to-end authentication flows
+- Use MSW for HTTP mocking
+- No other mocks unless absolutely necessary
+- Name files `*.flow.test.ts`
+
+**Example test:**
+
+```typescript
+// src/server/client.test.ts
+import { describe, it, expect } from "vitest";
+import { Auth0Client } from "./client";
+
+describe("Auth0Client", () => {
+  it("should instantiate with valid config", () => {
+    const client = new Auth0Client({
+      domain: "test.auth0.com",
+      clientId: "test-client-id",
+      clientSecret: "test-secret",
+      secret: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+    });
+    
+    expect(client).toBeDefined();
+  });
+});
+```
+
+### Documentation
+
+Update documentation for:
+- New configuration options
+- New public APIs
+- Breaking changes
+- New features
+
+**Documentation locations:**
+- `README.md`: Getting started guide
+- `EXAMPLES.md`: Usage examples and patterns
+- API documentation: Generated from JSDoc comments
+
+## Submitting Changes
+
+### Pull Request Process
+
+1. **Ensure all tests pass**
+   
+   ```bash
+   pnpm run test:coverage && pnpm run prepack && pnpm run lint:fix
+   ```
+
+2. **Update documentation**
+   
+   Add or update relevant documentation files.
+
+3. **Create a pull request**
+   
+   Push your branch and create a PR against `main`:
+   
+   ```bash
+   git push origin feature/my-feature
+   ```
+   
+   Go to [github.com/auth0/nextjs-auth0](https://github.com/auth0/nextjs-auth0) and click "New Pull Request".
+
+4. **Describe your changes**
+   
+   Provide a clear description of:
+   - What the change does
+   - Why it's needed
+   - How to test it
+   - Breaking changes (if any)
+
+5. **Wait for review**
+   
+   Maintainers will review your PR and may request changes.
+
+### Pull Request Checklist
+
+- [ ] All tests pass (`pnpm run test:coverage`)
+- [ ] Linting passes (`pnpm run lint`)
+- [ ] Build succeeds (`pnpm run build`)
+- [ ] Documentation updated
+- [ ] Commit messages follow conventions
+- [ ] Changes are backwards compatible (or breaking changes documented)
+- [ ] Added tests for new features
+- [ ] PR description is clear and complete
+
+### Breaking Changes
+
+If your PR includes breaking changes:
+
+1. **Mark it clearly** in the PR title: `[BREAKING] feat: ...`
+2. **Document migration steps** in the PR description
+3. **Update CHANGELOG.md** with breaking change notes
+4. **Consider deprecation** before removing features
+
+## Reporting Issues
+
+### Bug Reports
+
+When reporting bugs, include:
+
+- **Description:** Clear description of the issue
+- **Reproduction:** Steps to reproduce the behavior
+- **Expected behavior:** What you expected to happen
+- **Actual behavior:** What actually happened
+- **Environment:**
+  - SDK version (`@auth0/nextjs-auth0` version)
+  - Next.js version
+  - Node.js version
+  - Browser (if applicable)
+- **Code sample:** Minimal reproduction code
+- **Error messages:** Full error messages and stack traces
+
+**Example:**
+
+```markdown
+## Description
+Session cookie not persisting after login
+
+## Reproduction
+1. Configure Auth0Client with default settings
+2. Navigate to /auth/login
+3. Complete authentication
+4. Redirect to callback
+5. Session is not available
+
+## Expected
+Session should be available after successful authentication
+
+## Actual
+getSession() returns null
+
+## Environment
+- @auth0/nextjs-auth0: 3.5.0
+- Next.js: 14.1.0
+- Node.js: 20.10.0
+- Browser: Chrome 120
+
+## Code
+\`\`\`typescript
+const auth0 = new Auth0Client({
+  domain: "test.auth0.com",
+  clientId: "...",
+  // ...
+});
+\`\`\`
+
+## Error
+\`\`\`
+No error, session is simply not set
+\`\`\`
+```
+
+[Report a bug](https://github.com/auth0/nextjs-auth0/issues/new)
+
+### Feature Requests
+
+When requesting features:
+
+- **Use case:** Describe your use case
+- **Proposed solution:** How you envision it working
+- **Alternatives:** Other solutions you've considered
+- **Additional context:** Any other relevant information
+
+[Request a feature](https://github.com/auth0/nextjs-auth0/issues/new)
+
+### Security Vulnerabilities
+
+<Warning>
+**Do not report security vulnerabilities on the public GitHub issue tracker.**
+
+Please report security issues through Auth0's [Responsible Disclosure Program](https://auth0.com/responsible-disclosure-policy).
+</Warning>
+
+## Additional Resources
+
+### Contributing Guidelines
+
+- [Auth0's General Contribution Guidelines](https://github.com/auth0/open-source-template/blob/master/GENERAL-CONTRIBUTING.md)
+- [Auth0's Code of Conduct](https://github.com/auth0/nextjs-auth0/blob/main/CODE-OF-CONDUCT.md)
+- [This repo's contribution guide](https://github.com/auth0/nextjs-auth0/blob/main/CONTRIBUTING.md)
+
+### Documentation
+
+- [README.md](https://github.com/auth0/nextjs-auth0/blob/main/README.md): Getting started
+- [EXAMPLES.md](https://github.com/auth0/nextjs-auth0/blob/main/EXAMPLES.md): Usage examples
+- [API Reference](https://auth0.github.io/nextjs-auth0/): Generated API docs
+- [Auth0 Docs](https://auth0.com/docs): Auth0 platform documentation
+
+### Community
+
+- [GitHub Issues](https://github.com/auth0/nextjs-auth0/issues): Bug reports and feature requests
+- [Auth0 Community](https://community.auth0.com/): Ask questions and get help
+- [GitHub Discussions](https://github.com/auth0/nextjs-auth0/discussions): Discussions and ideas
+
+## License
+
+By contributing to this project, you agree that your contributions will be licensed under the [MIT License](https://github.com/auth0/nextjs-auth0/blob/main/LICENSE).
+
+## Thank You!
+
+Thank you for contributing to the Auth0 Next.js SDK. Your contributions help make authentication easier and more secure for developers worldwide.

@@ -1,0 +1,381 @@
+---
+title: updateSession
+description: Update the session of authenticated users
+---
+
+The `updateSession` method updates the session data for the currently authenticated user. An error is thrown if the user does not have an active session.
+
+## Method Signatures
+
+<CodeGroup>
+```typescript App Router
+// Server Actions, Route Handlers (not Server Components)
+await auth0.updateSession(
+  session: SessionData
+): Promise<void>
+```
+
+```typescript Pages Router
+// getServerSideProps, API Routes
+await auth0.updateSession(
+  req: IncomingMessage | NextApiRequest,
+  res: ServerResponse | NextApiResponse,
+  session: SessionData
+): Promise<void>
+```
+
+```typescript Middleware
+// middleware.ts
+await auth0.updateSession(
+  req: NextRequest,
+  res: NextResponse,
+  session: SessionData
+): Promise<void>
+```
+</CodeGroup>
+
+## Parameters
+
+<ParamField path="req" type="IncomingMessage | NextApiRequest | NextRequest">
+  The request object (Pages Router and middleware only)
+</ParamField>
+
+<ParamField path="res" type="ServerResponse | NextApiResponse | NextResponse">
+  The response object (Pages Router and middleware only)
+</ParamField>
+
+<ParamField path="session" type="SessionData" required>
+  The updated session data to persist
+  
+  ```typescript
+  interface SessionData {
+    user: User;
+    tokenSet: TokenSet;
+    internal: {
+      createdAt: number;
+    };
+    [key: string]: any; // Custom claims
+  }
+  ```
+</ParamField>
+
+## Returns
+
+Returns a `Promise<void>`. The method completes when the session has been updated.
+
+## Usage Examples
+
+### App Router
+
+<CodeGroup>
+```typescript Route Handler
+import { NextResponse } from 'next/server';
+import { auth0 } from '@/lib/auth0';
+
+export async function POST() {
+  const session = await auth0.getSession();
+
+  if (!session) {
+    return NextResponse.json(
+      { error: 'Unauthorized' },
+      { status: 401 }
+    );
+  }
+
+  // Update session with custom data
+  await auth0.updateSession({
+    ...session,
+    customClaim: 'new value',
+    lastUpdated: Date.now()
+  });
+
+  return NextResponse.json({ success: true });
+}
+```
+
+```typescript Server Action
+import { auth0 } from '@/lib/auth0';
+
+export async function updateUserPreferences(preferences: any) {
+  'use server';
+  
+  const session = await auth0.getSession();
+
+  if (!session) {
+    throw new Error('Unauthorized');
+  }
+
+  // Add preferences to session
+  await auth0.updateSession({
+    ...session,
+    preferences
+  });
+}
+```
+</CodeGroup>
+
+### Pages Router
+
+<CodeGroup>
+```typescript API Route
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { auth0 } from '@/lib/auth0';
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const session = await auth0.getSession(req);
+
+  if (!session) {
+    return res.status(401).json({ error: 'Unauthorized' });
+  }
+
+  // Update session
+  await auth0.updateSession(req, res, {
+    ...session,
+    lastActivity: Date.now()
+  });
+
+  res.json({ success: true });
+}
+```
+
+```typescript getServerSideProps
+import type { GetServerSideProps } from 'next';
+import { auth0 } from '@/lib/auth0';
+
+export const getServerSideProps: GetServerSideProps = async (ctx) => {
+  const session = await auth0.getSession(ctx.req);
+
+  if (!session) {
+    return { redirect: { destination: '/login', permanent: false } };
+  }
+
+  // Track page visits
+  await auth0.updateSession(ctx.req, ctx.res, {
+    ...session,
+    visitCount: (session.visitCount || 0) + 1
+  });
+
+  return { props: {} };
+};
+```
+</CodeGroup>
+
+### Middleware
+
+```typescript middleware.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { auth0 } from '@/lib/auth0';
+
+export async function middleware(request: NextRequest) {
+  const authRes = await auth0.middleware(request);
+
+  if (request.nextUrl.pathname.startsWith('/auth')) {
+    return authRes;
+  }
+
+  const session = await auth0.getSession(request);
+
+  if (!session) {
+    return NextResponse.redirect(
+      new URL('/auth/login', request.url)
+    );
+  }
+
+  // Add request metadata to session
+  await auth0.updateSession(request, authRes, {
+    ...session,
+    lastPath: request.nextUrl.pathname,
+    lastVisit: Date.now()
+  });
+
+  return authRes;
+}
+```
+
+## Common Use Cases
+
+### Adding Custom Claims
+
+```typescript
+const session = await auth0.getSession();
+
+if (session) {
+  await auth0.updateSession({
+    ...session,
+    role: 'admin',
+    permissions: ['read', 'write', 'delete'],
+    theme: 'dark'
+  });
+}
+```
+
+### Tracking User Activity
+
+```typescript
+const session = await auth0.getSession();
+
+if (session) {
+  await auth0.updateSession({
+    ...session,
+    lastActivity: new Date().toISOString(),
+    pageViews: (session.pageViews || 0) + 1
+  });
+}
+```
+
+### Storing Feature Flags
+
+```typescript
+const session = await auth0.getSession();
+
+if (session) {
+  await auth0.updateSession({
+    ...session,
+    features: {
+      betaAccess: true,
+      darkMode: true
+    }
+  });
+}
+```
+
+### Updating User Metadata
+
+```typescript
+const session = await auth0.getSession();
+
+if (session) {
+  await auth0.updateSession({
+    ...session,
+    user: {
+      ...session.user,
+      nickname: 'NewNickname',
+      metadata: {
+        favoriteColor: 'blue'
+      }
+    }
+  });
+}
+```
+
+## Important Notes
+
+<Warning>
+  **Session updates are temporary.** Any changes made via `updateSession` will be overwritten when the user re-authenticates and obtains a new session from Auth0.
+  
+  For persistent user data, update the user profile in Auth0 via the Management API.
+</Warning>
+
+<Warning>
+  **Cannot be used in Server Components.** The `updateSession` method requires the ability to set cookies, which is not possible in Server Components.
+  
+  Use Route Handlers or Server Actions instead.
+</Warning>
+
+<Note>
+  The `internal` property containing session creation timestamp is preserved automatically. You don't need to manually include it:
+  
+  ```typescript
+  await auth0.updateSession({
+    ...session,
+    customData: 'value'
+    // internal.createdAt is preserved automatically
+  });
+  ```
+</Note>
+
+<Note>
+  In middleware, you must pass both the `request` and `response` objects to ensure session updates can be read within the same request.
+</Note>
+
+## Error Handling
+
+The method throws an error when:
+
+- User has no active session
+- Session data is missing or invalid
+
+```typescript
+try {
+  await auth0.updateSession(updatedSession);
+} catch (error) {
+  console.error('Failed to update session:', error);
+  // Handle error (e.g., redirect to login)
+}
+```
+
+## Pages Router Middleware Integration
+
+When using Pages Router and reading session updates in the same request:
+
+```typescript middleware.ts
+import { NextRequest, NextResponse } from 'next/server';
+import { auth0 } from '@/lib/auth0';
+
+export async function middleware(request: NextRequest) {
+  const authRes = await auth0.middleware(request);
+
+  const session = await auth0.getSession(request);
+
+  if (session) {
+    await auth0.updateSession(request, authRes, {
+      ...session,
+      updatedAt: Date.now()
+    });
+  }
+
+  // Combine headers to ensure updates are propagated
+  const resWithCombinedHeaders = NextResponse.next({
+    request: {
+      headers: request.headers
+    }
+  });
+
+  authRes.headers.forEach((value, key) => {
+    resWithCombinedHeaders.headers.set(key, value);
+  });
+
+  return resWithCombinedHeaders;
+}
+```
+
+## Session Storage
+
+Session updates are persisted differently based on your session store configuration:
+
+### Stateless Sessions (Default)
+
+Updates are encrypted and stored in cookies:
+
+```typescript
+// Cookie size warning logged if session exceeds 4KB
+```
+
+### Stateful Sessions
+
+Updates are stored in your configured database:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+import { RedisStore } from './redis-store';
+
+export const auth0 = new Auth0Client({
+  sessionStore: new RedisStore()
+});
+```
+
+See [Session Stores](/server/session-stores) for implementation details.
+
+## Related Methods
+
+<CardGroup cols={2}>
+  <Card title="getSession" icon="id-card" href="/server/get-session">
+    Retrieve current session
+  </Card>
+  <Card title="Session Stores" icon="database" href="/server/session-stores">
+    Configure session storage
+  </Card>
+</CardGroup>

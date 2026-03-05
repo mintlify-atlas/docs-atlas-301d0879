@@ -1,0 +1,478 @@
+---
+title: 'Multi-Factor Authentication (MFA)'
+description: 'Implement step-up authentication with MFA in your Next.js application'
+---
+
+## Overview
+
+Multi-Factor Authentication (MFA) adds an additional layer of security by requiring users to provide multiple forms of verification. The SDK supports step-up authentication, where users can access basic resources but must complete MFA to access sensitive data.
+
+## Step-up Authentication
+
+Step-up authentication is a pattern where an application allows access to some resources, but requires the user to authenticate with a stronger mechanism (like MFA) to access sensitive resources.
+
+The SDK handles the `mfa_required` error from Auth0 when an API requires higher security. This typically happens when you use an Auth0 Action or Rule to enforce MFA for specific audiences or scopes.
+
+## Handling `MfaRequiredError`
+
+When you request an Access Token for a resource that requires MFA, Auth0 returns a `403 Forbidden` with an `mfa_required` error code. The SDK automatically catches this and throws an `MfaRequiredError` containing the `mfa_token` needed to resolve the challenge.
+
+### Server-Side Error Handling (API Route)
+
+```typescript app/api/protected/route.ts
+import { NextResponse } from "next/server";
+import { auth0 } from "@/lib/auth0";
+import { MfaRequiredError } from "@auth0/nextjs-auth0/server";
+
+export async function GET() {
+  try {
+    const { token } = await auth0.getAccessToken({
+      audience: "https://my-high-security-api",
+      refresh: true // Ensure we get a fresh token check
+    });
+
+    return NextResponse.json({ token });
+  } catch (error) {
+    if (error instanceof MfaRequiredError) {
+      // Forward the error details to the client
+      return NextResponse.json(error.toJSON(), { status: 403 });
+    }
+    throw error;
+  }
+}
+```
+
+### Client-Side MFA Challenge Flow
+
+When the client receives the 403 with `mfa_required`, redirect the user to complete the step-up challenge:
+
+```typescript app/dashboard/page.tsx
+"use client";
+
+import { useEffect, useState } from "react";
+
+export default function Dashboard() {
+  const [data, setData] = useState(null);
+  const [error, setError] = useState(null);
+
+  useEffect(() => {
+    async function fetchProtectedData() {
+      try {
+        const response = await fetch("/api/protected");
+
+        if (response.status === 403) {
+          const data = await response.json();
+
+          if (data.error === "mfa_required") {
+            // Redirect to MFA challenge page
+            window.location.href = `/mfa-challenge?token=${data.mfa_token}`;
+            return;
+          }
+        }
+
+        if (!response.ok) {
+          throw new Error("Failed to fetch data");
+        }
+
+        const result = await response.json();
+        setData(result);
+      } catch (err) {
+        setError(err.message);
+      }
+    }
+
+    fetchProtectedData();
+  }, []);
+
+  if (error) return <div>Error: {error}</div>;
+  if (!data) return <div>Loading...</div>;
+
+  return (
+    <div>
+      <h1>Protected Dashboard</h1>
+      <pre>{JSON.stringify(data, null, 2)}</pre>
+    </div>
+  );
+}
+```
+
+## MFA Tenant Configuration
+
+<Warning>
+The SDK relies on background token refreshes to maintain user sessions. For these non-interactive requests to succeed, configure your MFA policies appropriately.
+
+Enforcing **"Always"** or **"All Applications"** in your global Tenant MFA Policy will block background refresh requests, as they cannot satisfy an interactive MFA challenge.
+</Warning>
+
+### Recommended Configuration
+
+<Steps>
+  <Step title="Set Tenant MFA Policy">
+    In your Auth0 Dashboard, set the Tenant MFA Policy to **"Adaptive"** or **"Never"**.
+  </Step>
+
+  <Step title="Create Auth0 Action for Conditional MFA">
+    Use Auth0 Actions to enforce MFA conditionally based on the resource being accessed.
+
+    ```javascript
+    exports.onExecutePostLogin = async (event, api) => {
+      const grantType = event.request?.body?.grant_type;
+
+      if (grantType === 'refresh_token') {
+        // Check if user has enrolled factors
+        const enrolledFactors = event.user.multifactor || [];
+
+        if (enrolledFactors.length > 0) {
+          // Challenge with all available factor types
+          api.authentication.challengeWithAny([
+            { type: 'otp' },
+            { type: 'phone' },
+            { type: 'email' },
+            { type: 'push-notification' },
+            { type: 'recovery-code' }
+          ]);
+        } else {
+          // Prompt enrollment if no factors exist
+          api.authentication.enrollWithAny([
+            { type: 'otp' },
+            { type: 'phone' },
+            { type: 'email' },
+            { type: 'push-notification' }
+          ]);
+        }
+      }
+    };
+    ```
+  </Step>
+
+  <Step title="Configure Action Trigger">
+    Attach the Action to the **Login** flow in your Auth0 Dashboard.
+  </Step>
+</Steps>
+
+<Info>
+For more information on customizing MFA flows using post-login Actions, see the [Auth0 documentation](https://auth0.com/docs/secure/multi-factor-authentication/customize-mfa/customize-mfa-enrollments-universal-login).
+</Info>
+
+## MFA Error Types
+
+The SDK provides specific error classes for different MFA scenarios:
+
+| Error Class | Code | When Thrown |
+|-------------|------|-------------|
+| `MfaRequiredError` | `mfa_required` | Token refresh requires MFA step-up |
+| `MfaTokenNotFoundError` | `mfa_token_not_found` | No MFA context for provided token |
+| `MfaTokenExpiredError` | `mfa_token_expired` | Encrypted MFA token TTL exceeded |
+| `MfaTokenInvalidError` | `mfa_token_invalid` | Token tampered or wrong secret |
+
+### Handling Different MFA Errors
+
+```typescript app/api/mfa/verify/route.ts
+import { NextResponse } from "next/server";
+import { auth0 } from "@/lib/auth0";
+import {
+  MfaRequiredError,
+  MfaTokenExpiredError,
+  MfaTokenInvalidError,
+  MfaTokenNotFoundError
+} from "@auth0/nextjs-auth0/server";
+
+export async function POST(req: Request) {
+  try {
+    const { mfaToken, code } = await req.json();
+
+    // Attempt to verify MFA
+    await auth0.completeMfaChallenge(mfaToken, code);
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    if (error instanceof MfaTokenExpiredError) {
+      return NextResponse.json(
+        {
+          error: "mfa_token_expired",
+          message: "MFA session expired. Please restart authentication."
+        },
+        { status: 401 }
+      );
+    }
+
+    if (error instanceof MfaTokenInvalidError) {
+      return NextResponse.json(
+        {
+          error: "mfa_token_invalid",
+          message: "Invalid MFA token."
+        },
+        { status: 400 }
+      );
+    }
+
+    if (error instanceof MfaTokenNotFoundError) {
+      return NextResponse.json(
+        {
+          error: "mfa_token_not_found",
+          message: "MFA context not found. Please restart authentication."
+        },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: "verification_failed", message: "MFA verification failed" },
+      { status: 400 }
+    );
+  }
+}
+```
+
+## MFA Context Configuration
+
+Configure MFA token TTL via constructor options or environment variables:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+// Option 1: Via constructor
+export const auth0 = new Auth0Client({
+  mfaContextTtl: 600 // 10 minutes in seconds
+});
+```
+
+```env .env.local
+# Option 2: Via environment variable
+AUTH0_MFA_CONTEXT_TTL=600
+```
+
+<Note>
+Default TTL is 300 seconds (5 minutes), matching Auth0's `mfa_token` expiration.
+</Note>
+
+## Session Context Management
+
+When MFA is required, the SDK automatically stores MFA context in the session keyed by a hash of the raw token.
+
+### Automatic Cleanup
+
+The MFA context is cleaned up automatically when the session is written. Expired contexts (based on `mfaContextTtl`) are removed to prevent session bloat.
+
+### Context Structure
+
+```typescript
+// Internal session structure (managed by SDK)
+{
+  user: { ... },
+  tokenSet: { ... },
+  mfaContext: {
+    [tokenHash: string]: {
+      rawMfaToken: string,
+      expiresAt: number,
+      mfaRequirements?: {
+        enroll?: Array<{ type: string }>,
+        challenge?: Array<{ type: string }>
+      }
+    }
+  }
+}
+```
+
+## Complete MFA Flow Example
+
+### Step 1: Protected API Route
+
+```typescript app/api/sensitive-data/route.ts
+import { NextResponse } from "next/server";
+import { auth0 } from "@/lib/auth0";
+import { MfaRequiredError } from "@auth0/nextjs-auth0/server";
+
+export async function GET() {
+  try {
+    // Request token for high-security API
+    const { token } = await auth0.getAccessToken({
+      audience: "https://sensitive-api.example.com",
+      refresh: true
+    });
+
+    // Call the protected API
+    const response = await fetch("https://sensitive-api.example.com/data", {
+      headers: { Authorization: `Bearer ${token}` }
+    });
+
+    const data = await response.json();
+    return NextResponse.json(data);
+  } catch (error) {
+    if (error instanceof MfaRequiredError) {
+      return NextResponse.json(
+        {
+          error: "mfa_required",
+          error_description: error.error_description,
+          mfa_token: error.mfa_token,
+          mfa_requirements: error.mfa_requirements
+        },
+        { status: 403 }
+      );
+    }
+
+    return NextResponse.json(
+      { error: "internal_server_error" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### Step 2: MFA Challenge Page
+
+```typescript app/mfa-challenge/page.tsx
+"use client";
+
+import { useSearchParams } from "next/navigation";
+import { useState } from "react";
+
+export default function MfaChallenge() {
+  const searchParams = useSearchParams();
+  const mfaToken = searchParams.get("token");
+  const [code, setCode] = useState("");
+  const [error, setError] = useState(null);
+
+  async function handleSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+
+    try {
+      const response = await fetch("/api/mfa/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ mfaToken, code })
+      });
+
+      if (!response.ok) {
+        const data = await response.json();
+        setError(data.message);
+        return;
+      }
+
+      // MFA completed, redirect back to protected page
+      window.location.href = "/dashboard";
+    } catch (err) {
+      setError("Failed to verify MFA code");
+    }
+  }
+
+  return (
+    <div>
+      <h1>MFA Challenge Required</h1>
+      <p>Please enter your authentication code to continue.</p>
+
+      <form onSubmit={handleSubmit}>
+        <input
+          type="text"
+          value={code}
+          onChange={(e) => setCode(e.target.value)}
+          placeholder="Enter code"
+          required
+        />
+        <button type="submit">Verify</button>
+      </form>
+
+      {error && <div className="error">{error}</div>}
+    </div>
+  );
+}
+```
+
+### Step 3: MFA Verification API Route
+
+```typescript app/api/mfa/verify/route.ts
+import { NextResponse } from "next/server";
+import { auth0 } from "@/lib/auth0";
+
+export async function POST(req: Request) {
+  try {
+    const { mfaToken, code } = await req.json();
+
+    if (!mfaToken || !code) {
+      return NextResponse.json(
+        { error: "Missing mfaToken or code" },
+        { status: 400 }
+      );
+    }
+
+    // Complete MFA challenge (implementation depends on Auth0 MFA API)
+    // This is a placeholder - actual implementation would call Auth0's MFA API
+    await auth0.completeMfaChallenge(mfaToken, code);
+
+    return NextResponse.json({ success: true });
+  } catch (error) {
+    console.error("MFA verification failed:", error);
+
+    return NextResponse.json(
+      { error: "verification_failed", message: error.message },
+      { status: 400 }
+    );
+  }
+}
+```
+
+## Best Practices
+
+### Security Considerations
+
+1. **Use HTTPS**: Always use HTTPS in production to protect MFA tokens in transit
+2. **Short TTL**: Keep `mfaContextTtl` short (5-10 minutes) to limit exposure
+3. **Validate Tokens**: Always validate `mfa_token` on the server before using
+4. **Rate Limiting**: Implement rate limiting on MFA verification endpoints
+5. **Clear Context**: Clear MFA context after successful verification
+
+### User Experience
+
+1. **Clear Messaging**: Explain why MFA is required for specific resources
+2. **Session Persistence**: Don't require MFA too frequently for the same user
+3. **Error Handling**: Provide clear error messages for expired or invalid tokens
+4. **Fallback Options**: Offer multiple MFA methods when possible
+5. **Remember Device**: Consider implementing "remember this device" functionality
+
+### Implementation Tips
+
+1. **Conditional Enforcement**: Only require MFA for truly sensitive operations
+2. **Action-Based**: Use Auth0 Actions for flexible MFA enforcement rules
+3. **Testing**: Test MFA flows thoroughly in development before production
+4. **Monitoring**: Monitor MFA success/failure rates to detect issues
+5. **Documentation**: Document which resources require MFA for your team
+
+## Troubleshooting
+
+### Common Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| MFA always required | Global tenant policy too strict | Set to "Adaptive" or "Never" |
+| Token refresh fails | Refresh grant blocked by MFA | Configure Action to skip refresh_token grant |
+| Context not found | Session expired or cleared | Restart authentication flow |
+| Invalid token | Token tampered or wrong secret | Regenerate and use new token |
+
+### Debug Tips
+
+Enable logging to troubleshoot MFA issues:
+
+```typescript
+try {
+  const { token } = await auth0.getAccessToken({
+    audience: "https://api.example.com",
+    refresh: true
+  });
+} catch (error) {
+  if (error instanceof MfaRequiredError) {
+    console.log("MFA Required:", {
+      error: error.error,
+      description: error.error_description,
+      requirements: error.mfa_requirements,
+      hasToken: !!error.mfa_token
+    });
+  }
+}
+```
+
+## Further Reading
+
+- [Auth0 MFA Documentation](https://auth0.com/docs/secure/multi-factor-authentication)
+- [Customize MFA with Actions](https://auth0.com/docs/secure/multi-factor-authentication/customize-mfa/customize-mfa-enrollments-universal-login)
+- [MFA API Reference](https://auth0.com/docs/api/authentication#multi-factor-authentication)

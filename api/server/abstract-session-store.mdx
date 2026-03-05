@@ -1,0 +1,414 @@
+---
+title: AbstractSessionStore
+description: Base class for custom session store implementations
+---
+
+The `AbstractSessionStore` is an abstract base class for implementing custom session stores. It provides the foundation for both stateless (cookie-based) and stateful (external store) session management.
+
+## Overview
+
+The SDK provides two built-in implementations:
+- **StatelessSessionStore**: Stores the entire session in an encrypted cookie (default)
+- **StatefulSessionStore**: Stores a session ID in a cookie and the session data in an external store
+
+You can extend `AbstractSessionStore` to create custom session storage implementations.
+
+## Constructor
+
+```typescript
+constructor(options: SessionStoreOptions)
+```
+
+### Options
+
+<ParamField path="secret" type="string" required>
+  A 32-byte, hex-encoded secret used for encrypting cookies.
+</ParamField>
+
+<ParamField path="rolling" type="boolean" default={true}>
+  A boolean indicating whether rolling sessions should be used or not.
+  
+  When enabled, the session will continue to be extended as long as it is used within the inactivity duration. Once the upper bound, set via the `absoluteDuration`, has been reached, the session will no longer be extended.
+</ParamField>
+
+<ParamField path="absoluteDuration" type="number" default={259200}>
+  The absolute duration after which the session will expire (in seconds).
+  
+  Once the absolute duration has been reached, the session will no longer be extended.
+  
+  Default: 3 days (259200 seconds).
+</ParamField>
+
+<ParamField path="inactivityDuration" type="number" default={86400}>
+  The duration of inactivity after which the session will expire (in seconds).
+  
+  The session will be extended as long as it was active before the inactivity duration has been reached.
+  
+  Default: 1 day (86400 seconds).
+</ParamField>
+
+<ParamField path="store" type="SessionDataStore">
+  A custom session store implementation used to persist sessions to a data store.
+</ParamField>
+
+<ParamField path="cookieOptions" type="SessionCookieOptions">
+  The options for the session cookie.
+</ParamField>
+
+<ParamField path="cookieOptions.name" type="string" default="__session">
+  The name of the session cookie.
+</ParamField>
+
+<ParamField path="cookieOptions.sameSite" type="'strict' | 'lax' | 'none'" default="lax">
+  The sameSite attribute of the session cookie.
+</ParamField>
+
+<ParamField path="cookieOptions.secure" type="boolean">
+  The secure attribute of the session cookie.
+  
+  Default: depends on the protocol of the application's base URL. If the protocol is `https`, then `true`, otherwise `false`.
+</ParamField>
+
+<ParamField path="cookieOptions.path" type="string" default="/">
+  The path attribute of the session cookie.
+</ParamField>
+
+<ParamField path="cookieOptions.domain" type="string">
+  Specifies the value for the Domain Set-Cookie attribute. By default, no domain is set, and most clients will consider the cookie to apply to only the current domain.
+</ParamField>
+
+<ParamField path="cookieOptions.transient" type="boolean">
+  The transient attribute of the session cookie. When true, the cookie will not persist beyond the current session.
+</ParamField>
+
+## Abstract Methods
+
+These methods must be implemented by subclasses.
+
+### get
+
+```typescript
+abstract get(
+  reqCookies: RequestCookies | ReadonlyRequestCookies
+): Promise<SessionData | null>
+```
+
+Retrieves the session data from the store.
+
+<ParamField path="reqCookies" type="RequestCookies | ReadonlyRequestCookies" required>
+  The request cookies object.
+</ParamField>
+
+<ResponseField name="session" type="Promise<SessionData | null>">
+  Returns the session data or `null` if no session exists.
+</ResponseField>
+
+### set
+
+```typescript
+abstract set(
+  reqCookies: RequestCookies | ReadonlyRequestCookies,
+  resCookies: ResponseCookies,
+  session: SessionData,
+  isNew?: boolean
+): Promise<void>
+```
+
+Saves the session data to the store and sets the session cookie.
+
+The `iat` property on the session will be used to compute the `maxAge` cookie value.
+
+<ParamField path="reqCookies" type="RequestCookies | ReadonlyRequestCookies" required>
+  The request cookies object.
+</ParamField>
+
+<ParamField path="resCookies" type="ResponseCookies" required>
+  The response cookies object.
+</ParamField>
+
+<ParamField path="session" type="SessionData" required>
+  The session data to save.
+</ParamField>
+
+<ParamField path="isNew" type="boolean">
+  Whether this is a new session.
+</ParamField>
+
+### delete
+
+```typescript
+abstract delete(
+  reqCookies: RequestCookies | ReadonlyRequestCookies,
+  resCookies: ResponseCookies
+): Promise<void>
+```
+
+Deletes the session from the store and clears the session cookie.
+
+<ParamField path="reqCookies" type="RequestCookies | ReadonlyRequestCookies" required>
+  The request cookies object.
+</ParamField>
+
+<ParamField path="resCookies" type="ResponseCookies" required>
+  The response cookies object.
+</ParamField>
+
+## Protected Methods
+
+These methods are available to subclasses.
+
+### epoch
+
+```typescript
+epoch(): number
+```
+
+Returns the time since unix epoch in seconds.
+
+<ResponseField name="timestamp" type="number">
+  The current time in seconds since epoch.
+</ResponseField>
+
+### calculateMaxAge
+
+```typescript
+calculateMaxAge(createdAt: number): number
+```
+
+Calculates the max age of the session based on createdAt and the rolling and absolute durations.
+
+<ParamField path="createdAt" type="number" required>
+  The time the session was created (seconds since epoch).
+</ParamField>
+
+<ResponseField name="maxAge" type="number">
+  The maximum age of the session in seconds.
+</ResponseField>
+
+## Public Properties
+
+<ResponseField name="secret" type="string">
+  The secret used for encrypting cookies.
+</ResponseField>
+
+<ResponseField name="sessionCookieName" type="string">
+  The name of the session cookie.
+</ResponseField>
+
+<ResponseField name="store" type="SessionDataStore | undefined">
+  The custom session store implementation (if provided).
+</ResponseField>
+
+<ResponseField name="cookieConfig" type="CookieOptions">
+  The cookie configuration options.
+</ResponseField>
+
+## SessionDataStore Interface
+
+When implementing a custom session store, you must provide an object that implements the `SessionDataStore` interface:
+
+```typescript
+interface SessionDataStore {
+  /**
+   * Gets the session from the store given a session ID.
+   */
+  get(id: string): Promise<SessionData | null>;
+
+  /**
+   * Upsert a session in the store given a session ID and SessionData.
+   */
+  set(id: string, session: SessionData): Promise<void>;
+
+  /**
+   * Destroys the session with the given session ID.
+   */
+  delete(id: string): Promise<void>;
+
+  /**
+   * Deletes the session with the given logout token which may contain
+   * a session ID or a user ID, or both.
+   */
+  deleteByLogoutToken?(logoutToken: LogoutToken): Promise<void>;
+}
+```
+
+### get
+
+```typescript
+get(id: string): Promise<SessionData | null>
+```
+
+Gets the session from the store given a session ID.
+
+<ParamField path="id" type="string" required>
+  The session ID.
+</ParamField>
+
+<ResponseField name="session" type="Promise<SessionData | null>">
+  Returns the session data or `null` if no session exists.
+</ResponseField>
+
+### set
+
+```typescript
+set(id: string, session: SessionData): Promise<void>
+```
+
+Upserts a session in the store given a session ID and SessionData.
+
+<ParamField path="id" type="string" required>
+  The session ID.
+</ParamField>
+
+<ParamField path="session" type="SessionData" required>
+  The session data to save.
+</ParamField>
+
+### delete
+
+```typescript
+delete(id: string): Promise<void>
+```
+
+Destroys the session with the given session ID.
+
+<ParamField path="id" type="string" required>
+  The session ID.
+</ParamField>
+
+### deleteByLogoutToken
+
+```typescript
+deleteByLogoutToken?(logoutToken: LogoutToken): Promise<void>
+```
+
+Deletes the session with the given logout token which may contain a session ID or a user ID, or both.
+
+<ParamField path="logoutToken" type="LogoutToken" required>
+  The logout token containing `sub` (user ID) and/or `sid` (session ID).
+</ParamField>
+
+## Example: Custom Database Session Store
+
+```typescript
+import { SessionDataStore, SessionData, LogoutToken } from '@auth0/nextjs-auth0/types';
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+import { sql } from './db';
+
+class DatabaseSessionStore implements SessionDataStore {
+  async get(id: string): Promise<SessionData | null> {
+    const result = await sql`
+      SELECT session_data FROM sessions WHERE id = ${id}
+    `;
+    
+    if (result.length === 0) {
+      return null;
+    }
+    
+    return JSON.parse(result[0].session_data);
+  }
+
+  async set(id: string, session: SessionData): Promise<void> {
+    await sql`
+      INSERT INTO sessions (id, session_data, updated_at)
+      VALUES (${id}, ${JSON.stringify(session)}, NOW())
+      ON CONFLICT (id)
+      DO UPDATE SET
+        session_data = ${JSON.stringify(session)},
+        updated_at = NOW()
+    `;
+  }
+
+  async delete(id: string): Promise<void> {
+    await sql`DELETE FROM sessions WHERE id = ${id}`;
+  }
+
+  async deleteByLogoutToken(logoutToken: LogoutToken): Promise<void> {
+    if (logoutToken.sid) {
+      await this.delete(logoutToken.sid);
+    } else if (logoutToken.sub) {
+      await sql`
+        DELETE FROM sessions
+        WHERE session_data::json->>'user'->>'sub' = ${logoutToken.sub}
+      `;
+    }
+  }
+}
+
+// Use the custom session store
+export const auth0 = new Auth0Client({
+  sessionStore: new DatabaseSessionStore()
+});
+```
+
+## Example: Redis Session Store
+
+```typescript
+import { SessionDataStore, SessionData } from '@auth0/nextjs-auth0/types';
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+import { createClient } from 'redis';
+
+const redisClient = createClient({
+  url: process.env.REDIS_URL
+});
+await redisClient.connect();
+
+class RedisSessionStore implements SessionDataStore {
+  async get(id: string): Promise<SessionData | null> {
+    const data = await redisClient.get(`session:${id}`);
+    
+    if (!data) {
+      return null;
+    }
+    
+    return JSON.parse(data);
+  }
+
+  async set(id: string, session: SessionData): Promise<void> {
+    // Store with 7 day TTL
+    await redisClient.setEx(
+      `session:${id}`,
+      60 * 60 * 24 * 7,
+      JSON.stringify(session)
+    );
+  }
+
+  async delete(id: string): Promise<void> {
+    await redisClient.del(`session:${id}`);
+  }
+}
+
+export const auth0 = new Auth0Client({
+  sessionStore: new RedisSessionStore()
+});
+```
+
+## SessionData Type
+
+```typescript
+interface SessionData {
+  user: User;
+  tokenSet: TokenSet;
+  accessTokens?: AccessTokenSet[];
+  internal: {
+    sid: string;         // Session ID from authorization server
+    createdAt: number;   // Time session was created (seconds since epoch)
+  };
+  connectionTokenSets?: ConnectionTokenSet[];
+  [key: string]: unknown;
+}
+```
+
+## Best Practices
+
+1. **Session Expiration**: Implement proper TTL/expiration in your custom store to prevent stale sessions from accumulating.
+
+2. **Error Handling**: Implement proper error handling in your store methods. The SDK will catch errors and treat them as missing sessions.
+
+3. **Performance**: Consider implementing caching strategies for frequently accessed sessions.
+
+4. **Security**: Ensure your session store is properly secured and access is restricted.
+
+5. **Backchannel Logout**: Implement `deleteByLogoutToken` to support Auth0's backchannel logout feature.
+
+6. **Cleanup**: Implement a background job to clean up expired sessions from your store.

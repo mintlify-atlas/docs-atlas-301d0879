@@ -1,0 +1,431 @@
+---
+title: 'Multi-Resource Refresh Tokens (MRRT)'
+description: 'Learn how to use a single refresh token to obtain access tokens for multiple APIs'
+---
+
+## Overview
+
+Multi-Resource Refresh Tokens (MRRT) allow using a single refresh token to obtain access tokens for multiple audiences, simplifying token management in applications that interact with multiple backend services.
+
+<Info>
+Read more about [Multi-Resource Refresh Tokens in the Auth0 documentation](https://auth0.com/docs/secure/tokens/refresh-tokens/multi-resource-refresh-token).
+</Info>
+
+<Warning>
+When using MRRT, **Refresh Token Policies** on your Application must be configured with the audiences you want to support. Tokens requested for audiences outside your configured policies will be ignored by Auth0, which will return a token for the default audience instead.
+
+See the [Auth0 MRRT documentation](https://auth0.com/docs/secure/tokens/refresh-tokens/multi-resource-refresh-token) for setup instructions.
+</Warning>
+
+## Basic Configuration
+
+Configure a default audience in your Auth0 client initialization:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  authorizationParameters: {
+    audience: "https://api.example.com", // Your default audience
+    scope: "openid profile email offline_access read:products read:orders"
+  }
+});
+```
+
+<Info>
+The `offline_access` scope is required to receive a refresh token that can be used with MRRT.
+</Info>
+
+## Configuring Scopes Per Audience
+
+When working with multiple APIs, you can define different default scopes for each audience by passing an object instead of a string:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  authorizationParameters: {
+    audience: "https://api.example.com", // Default audience
+    scope: {
+      "https://api.example.com":
+        "openid profile email offline_access read:products read:orders",
+      "https://analytics.example.com":
+        "openid profile email offline_access read:analytics write:analytics",
+      "https://admin.example.com":
+        "openid profile email offline_access read:admin write:admin delete:admin"
+    }
+  }
+});
+```
+
+### How Scope Configuration Works
+
+- Each key in the `scope` object is an `audience` identifier
+- The corresponding value is the scope string for that audience
+- When calling `getAccessToken({ audience: "..." })`, the SDK automatically uses the configured scopes for that audience
+- When additional scopes are passed in the method call, they are merged with the default scopes for that audience
+
+<Note>
+When using scope as an object without an entry for the default audience, the SDK defaults to `DEFAULT_SCOPE` (only for the default audience used during authentication).
+</Note>
+
+## Usage Examples
+
+### App Router - Route Handlers
+
+```typescript app/api/data/route.ts
+import { NextResponse } from "next/server";
+import { auth0 } from "@/lib/auth0";
+
+export async function GET() {
+  try {
+    // Get token for default audience
+    const defaultToken = await auth0.getAccessToken();
+
+    // Get token for different audience
+    const dataToken = await auth0.getAccessToken({
+      audience: "https://data-api.example.com"
+    });
+
+    // Get token with additional scopes
+    const adminToken = await auth0.getAccessToken({
+      audience: "https://admin.example.com",
+      scope: "write:admin"
+    });
+
+    // Call external API with token
+    const response = await fetch("https://data-api.example.com/data", {
+      headers: { Authorization: `Bearer ${dataToken.token}` }
+    });
+
+    const data = await response.json();
+    return NextResponse.json(data);
+  } catch (error) {
+    return NextResponse.json(
+      { error: "Failed to fetch data" },
+      { status: 500 }
+    );
+  }
+}
+```
+
+### Pages Router - API Routes
+
+```typescript pages/api/data.ts
+import type { NextApiRequest, NextApiResponse } from "next";
+import { auth0 } from "@/lib/auth0";
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  try {
+    // Get token for specific audience
+    const dataToken = await auth0.getAccessToken(req, res, {
+      audience: "https://data-api.example.com"
+    });
+
+    // Use the token to call the API
+    const response = await fetch("https://data-api.example.com/data", {
+      headers: { Authorization: `Bearer ${dataToken.token}` }
+    });
+
+    const data = await response.json();
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch data" });
+  }
+}
+```
+
+### Pages Router - getServerSideProps
+
+```typescript pages/dashboard.tsx
+import { GetServerSideProps } from "next";
+import { auth0 } from "@/lib/auth0";
+
+export const getServerSideProps: GetServerSideProps = async (context) => {
+  try {
+    // Get tokens for multiple audiences
+    const productToken = await auth0.getAccessToken(context.req, context.res, {
+      audience: "https://products-api.example.com"
+    });
+
+    const analyticsToken = await auth0.getAccessToken(
+      context.req,
+      context.res,
+      {
+        audience: "https://analytics.example.com"
+      }
+    );
+
+    // Fetch data from multiple APIs
+    const [productsRes, analyticsRes] = await Promise.all([
+      fetch("https://products-api.example.com/products", {
+        headers: { Authorization: `Bearer ${productToken.token}` }
+      }),
+      fetch("https://analytics.example.com/stats", {
+        headers: { Authorization: `Bearer ${analyticsToken.token}` }
+      })
+    ]);
+
+    const [products, analytics] = await Promise.all([
+      productsRes.json(),
+      analyticsRes.json()
+    ]);
+
+    return {
+      props: {
+        products,
+        analytics
+      }
+    };
+  } catch (error) {
+    return {
+      props: {
+        error: "Failed to load data"
+      }
+    };
+  }
+};
+
+export default function Dashboard({ products, analytics, error }) {
+  if (error) return <div>Error: {error}</div>;
+
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <div>Products: {products.length}</div>
+      <div>Total views: {analytics.views}</div>
+    </div>
+  );
+}
+```
+
+### Middleware
+
+```typescript middleware.ts
+import { NextRequest, NextResponse } from "next/server";
+import { auth0 } from "./lib/auth0";
+
+export async function middleware(request: NextRequest) {
+  const authRes = await auth0.middleware(request);
+
+  if (request.nextUrl.pathname.startsWith("/auth")) {
+    return authRes;
+  }
+
+  // Get token for specific audience in middleware
+  const token = await auth0.getAccessToken(request, authRes, {
+    audience: "https://api.example.com"
+  });
+
+  // Token is now refreshed and persisted via authRes
+  return authRes;
+}
+```
+
+<Note>
+The syntax for calling `getAccessToken()` varies depending on the context:
+- **App Router** (Server Components, Route Handlers, Server Actions): `getAccessToken(options)`
+- **Pages Router** (API Routes, getServerSideProps): `getAccessToken(req, res, options)`
+- **Middleware**: `getAccessToken(req, res, options)`
+
+See the [Getting an access token](/getting-started/access-tokens) section for detailed syntax examples.
+</Note>
+
+## Token Management Best Practices
+
+### Configure Broad Default Scopes
+
+Define comprehensive scopes in your `Auth0Client` constructor for common use cases. This minimizes the need to request additional scopes dynamically, reducing the number of tokens stored:
+
+```typescript lib/auth0.ts
+export const auth0 = new Auth0Client({
+  authorizationParameters: {
+    audience: "https://api.example.com",
+    // Configure broad default scopes for most common operations
+    scope:
+      "openid profile email offline_access read:products read:orders read:users"
+  }
+});
+```
+
+### Minimize Dynamic Scope Requests
+
+Avoid passing `scope` when calling `getAccessToken()` unless absolutely necessary. Each `audience` + `scope` combination results in a token to store in the session, increasing session size:
+
+```typescript
+// ✅ Preferred: Use default scopes
+const token = await auth0.getAccessToken({
+  audience: "https://api.example.com"
+});
+
+// ⚠️ Avoid unless necessary: Dynamic scopes increase session size
+const token = await auth0.getAccessToken({
+  audience: "https://api.example.com",
+  scope: "openid profile email read:products write:products admin:all"
+});
+```
+
+### Consider Stateful Session Storage
+
+If your application requires strict least privilege with many dynamic scope requests, use [stateful session storage](/advanced/database-sessions) instead of cookie-based sessions to avoid size limitations:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+import { DatabaseSessionStore } from "./session-store";
+
+export const auth0 = new Auth0Client({
+  sessionStore: new DatabaseSessionStore(),
+  authorizationParameters: {
+    audience: "https://api.example.com",
+    scope: {
+      "https://api.example.com": "openid profile email offline_access read:data",
+      "https://analytics.example.com": "openid profile email offline_access read:analytics",
+      "https://admin.example.com": "openid profile email offline_access read:admin write:admin"
+    }
+  }
+});
+```
+
+## Token Storage and Session Size
+
+Each unique combination of `audience` and `scope` results in a separate access token stored in the session:
+
+```typescript
+// This creates 3 separate tokens in the session
+const token1 = await auth0.getAccessToken({
+  audience: "https://api1.example.com"
+});
+
+const token2 = await auth0.getAccessToken({
+  audience: "https://api2.example.com"
+});
+
+const token3 = await auth0.getAccessToken({
+  audience: "https://api1.example.com",
+  scope: "write:data" // Different scope = different token
+});
+```
+
+Session structure with MRRT:
+
+```json
+{
+  "user": { ... },
+  "tokenSet": {
+    "accessToken": "default_audience_token",
+    "refreshToken": "shared_refresh_token",
+    "expiresAt": 1234567890
+  },
+  "accessTokens": [
+    {
+      "audience": "https://api1.example.com",
+      "scope": "read:data",
+      "accessToken": "token_for_api1",
+      "expiresAt": 1234567890
+    },
+    {
+      "audience": "https://api2.example.com",
+      "scope": "read:analytics",
+      "accessToken": "token_for_api2",
+      "expiresAt": 1234567890
+    }
+  ]
+}
+```
+
+<Warning>
+Browser cookies have size limits (typically 4KB). Plan your token strategy to avoid exceeding these limits, or use [stateful session storage](/advanced/database-sessions).
+</Warning>
+
+## Error Handling
+
+Handle MRRT-specific errors appropriately:
+
+```typescript app/api/data/route.ts
+import { AccessTokenError } from "@auth0/nextjs-auth0/errors";
+import { auth0 } from "@/lib/auth0";
+
+try {
+  const token = await auth0.getAccessToken({
+    audience: "https://api.example.com"
+  });
+
+  // Use token...
+} catch (error) {
+  if (error instanceof AccessTokenError) {
+    console.error("Failed to get access token:", error.message);
+
+    // Handle specific scenarios
+    if (error.message.includes("No refresh token")) {
+      // User needs to re-authenticate with offline_access scope
+      return Response.redirect("/auth/login");
+    }
+
+    if (error.message.includes("audience")) {
+      // Audience not configured in MRRT policy
+      console.error("Audience not allowed in MRRT policy");
+    }
+  }
+
+  return Response.json({ error: "Internal server error" }, { status: 500 });
+}
+```
+
+## Refresh Token Rotation
+
+<Warning>
+If your Auth0 application uses Refresh Token Rotation, configure an overlap period to prevent race conditions when multiple requests attempt to refresh tokens simultaneously.
+
+This can be configured in your Auth0 Dashboard under Applications > Advanced Settings > OAuth, or disable rotation entirely for server-side applications.
+</Warning>
+
+## Common Issues and Solutions
+
+### Token Returns Default Audience Instead of Requested
+
+**Problem**: Requesting a token for a specific audience returns a token for the default audience.
+
+**Solution**: Verify that the audience is included in your Application's Refresh Token Policies in the Auth0 Dashboard.
+
+### Session Cookie Size Exceeded
+
+**Problem**: Browser rejects cookies due to size limits.
+
+**Solution**: 
+- Reduce the number of audiences/scope combinations
+- Use stateful session storage
+- Configure broader default scopes to minimize dynamic requests
+
+### Missing `offline_access` Scope
+
+**Problem**: Cannot obtain refresh token for MRRT.
+
+**Solution**: Add `offline_access` to your authorization parameters:
+
+```typescript
+export const auth0 = new Auth0Client({
+  authorizationParameters: {
+    audience: "https://api.example.com",
+    scope: "openid profile email offline_access" // Include offline_access
+  }
+});
+```
+
+### Race Conditions with Token Refresh
+
+**Problem**: Multiple concurrent requests cause refresh token rotation issues.
+
+**Solution**: Configure an overlap period in Auth0 Dashboard or handle requests sequentially when possible.
+
+## Best Practices Summary
+
+1. **Configure MRRT Policies** in Auth0 Dashboard with all required audiences
+2. **Use broad default scopes** to minimize token storage
+3. **Include `offline_access`** scope for refresh tokens
+4. **Monitor session size** and use stateful storage if needed
+5. **Handle token errors** gracefully with appropriate fallbacks
+6. **Test audience configuration** during development
+7. **Document your audiences** and their required scopes

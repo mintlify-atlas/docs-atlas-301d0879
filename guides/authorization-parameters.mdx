@@ -1,0 +1,353 @@
+---
+title: Authorization Parameters
+description: Customize the OAuth authorization flow by passing parameters to Auth0.
+---
+
+Authorization parameters allow you to customize the authentication flow by passing additional parameters to Auth0's `/authorize` endpoint. You can configure these parameters statically or dynamically.
+
+## Static Configuration
+
+Define authorization parameters when initializing the Auth0 client. These parameters will be used for all authentication requests.
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  authorizationParameters: {
+    scope: "openid profile email",
+    audience: "https://api.example.com"
+  }
+});
+```
+
+### Common Parameters
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `scope` | `string` | OAuth scopes to request (e.g., `"openid profile email"`) |
+| `audience` | `string` | API identifier for the target API |
+| `connection` | `string` | Force a specific identity provider (e.g., `"google-oauth2"`) |
+| `prompt` | `string` | Control authentication prompt (`"none"`, `"login"`, `"consent"`) |
+| `screen_hint` | `string` | Display signup or login screen (`"signup"`, `"login"`) |
+| `ui_locales` | `string` | Preferred language for the login page (e.g., `"en"`, `"es"`) |
+| `organization` | `string` | Organization ID for organization-based authentication |
+| `invitation` | `string` | Invitation ID for organization invitations |
+
+## Dynamic Configuration
+
+Pass authorization parameters dynamically via query parameters to the `/auth/login` endpoint. This allows different authentication flows for different user actions.
+
+### Using Query Parameters
+
+<Steps>
+  <Step title="Add parameters to login URL">
+    Append parameters to the login URL as query strings:
+
+    ```tsx
+    export default function LoginButtons() {
+      return (
+        <div>
+          {/* Login with specific audience */}
+          <a href="/auth/login?audience=https://api.example.com">
+            Log in
+          </a>
+
+          {/* Login with signup screen */}
+          <a href="/auth/login?screen_hint=signup">
+            Sign up
+          </a>
+
+          {/* Login with specific connection */}
+          <a href="/auth/login?connection=google-oauth2">
+            Log in with Google
+          </a>
+        </div>
+      );
+    }
+    ```
+  </Step>
+
+  <Step title="Test the flow">
+    Click the links to test different authentication flows. The parameters will be forwarded to Auth0.
+  </Step>
+</Steps>
+
+<Note>
+  Dynamic parameters override static parameters configured in the Auth0 client.
+</Note>
+
+## Common Use Cases
+
+### Force Signup Screen
+
+Direct users to the signup form instead of the login form:
+
+```tsx
+export default function SignupButton() {
+  return (
+    <a href="/auth/login?screen_hint=signup">
+      Create an account
+    </a>
+  );
+}
+```
+
+### Specify API Audience
+
+Request an access token for a specific API:
+
+```tsx
+export default function LoginForAPI() {
+  return (
+    <a href="/auth/login?audience=https://api.example.com">
+      Log in to access API
+    </a>
+  );
+}
+```
+
+**Or configure it statically:**
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  authorizationParameters: {
+    audience: "https://api.example.com",
+    scope: "openid profile email read:data write:data"
+  }
+});
+```
+
+### Force Specific Connection
+
+Bypass the login page and go directly to a social provider:
+
+```tsx
+export default function SocialLogins() {
+  return (
+    <div>
+      <a href="/auth/login?connection=google-oauth2">
+        Continue with Google
+      </a>
+      <a href="/auth/login?connection=github">
+        Continue with GitHub
+      </a>
+      <a href="/auth/login?connection=facebook">
+        Continue with Facebook
+      </a>
+    </div>
+  );
+}
+```
+
+### Organization Login
+
+Authenticate users within a specific organization:
+
+```tsx
+export default function OrganizationLogin({ orgId }: { orgId: string }) {
+  return (
+    <a href={`/auth/login?organization=${orgId}`}>
+      Log in to organization
+    </a>
+  );
+}
+```
+
+### Silent Authentication
+
+Check for an existing Auth0 session without user interaction:
+
+```tsx
+export default function SilentAuthButton() {
+  return (
+    <a href="/auth/login?prompt=none">
+      Silent authentication
+    </a>
+  );
+}
+```
+
+<Warning>
+  Silent authentication (`prompt=none`) will fail with `login_required` error if no active session exists. Handle this error gracefully by redirecting to interactive login.
+</Warning>
+
+### Custom Scopes
+
+Request additional permissions beyond the defaults:
+
+```tsx
+export default function AdminLogin() {
+  return (
+    <a href="/auth/login?scope=openid profile email admin:access">
+      Log in as admin
+    </a>
+  );
+}
+```
+
+### Localized Login Page
+
+Display the login page in a specific language:
+
+```tsx
+export default function LocalizedLogin({ locale }: { locale: string }) {
+  return (
+    <a href={`/auth/login?ui_locales=${locale}`}>
+      Log in
+    </a>
+  );
+}
+
+// Usage
+<LocalizedLogin locale="es" /> // Spanish
+<LocalizedLogin locale="fr" /> // French
+<LocalizedLogin locale="de" /> // German
+```
+
+## Combining Parameters
+
+Combine multiple parameters for complex authentication flows:
+
+```tsx
+export default function CustomLogin() {
+  return (
+    <a href="/auth/login?screen_hint=signup&connection=google-oauth2&ui_locales=es">
+      Sign up with Google (Spanish)
+    </a>
+  );
+}
+```
+
+## Parameter Precedence
+
+When the same parameter is defined in multiple places, the SDK uses this precedence order:
+
+1. **Query parameters** (highest priority) - `/auth/login?audience=...`
+2. **Static configuration** - `new Auth0Client({ authorizationParameters: { ... } })`
+3. **Default values** (lowest priority) - SDK defaults
+
+**Example:**
+
+```typescript lib/auth0.ts
+// Static configuration
+export const auth0 = new Auth0Client({
+  authorizationParameters: {
+    scope: "openid profile email",
+    audience: "https://api.example.com"
+  }
+});
+```
+
+```tsx
+{/* Query parameter overrides static audience */}
+<a href="/auth/login?audience=https://admin-api.example.com">
+  Log in
+</a>
+```
+
+In this case, the audience will be `https://admin-api.example.com`, not `https://api.example.com`.
+
+## Programmatic Login
+
+For advanced use cases, you can start the login flow programmatically from an API route:
+
+<Tabs>
+  <Tab title="App Router">
+    ```typescript app/api/auth/custom-login/route.ts
+    import { auth0 } from "@/lib/auth0";
+    import { NextRequest } from "next/server";
+
+    export async function GET(req: NextRequest) {
+      return auth0.startInteractiveLogin({
+        authorizationParameters: {
+          audience: "https://api.example.com",
+          scope: "openid profile email admin:access",
+          connection: "google-oauth2"
+        },
+        returnTo: "/dashboard"
+      });
+    }
+    ```
+
+    Then redirect users to your custom route:
+
+    ```tsx
+    <a href="/api/auth/custom-login">Custom Login</a>
+    ```
+  </Tab>
+
+  <Tab title="Pages Router">
+    ```typescript pages/api/auth/custom-login.ts
+    import type { NextApiRequest, NextApiResponse } from "next";
+    import { auth0 } from "@/lib/auth0";
+
+    export default async function handler(
+      req: NextApiRequest,
+      res: NextApiResponse
+    ) {
+      return auth0.startInteractiveLogin(req, res, {
+        authorizationParameters: {
+          audience: "https://api.example.com",
+          scope: "openid profile email admin:access",
+          connection: "google-oauth2"
+        },
+        returnTo: "/dashboard"
+      });
+    }
+    ```
+
+    Then redirect users to your custom route:
+
+    ```tsx
+    <a href="/api/auth/custom-login">Custom Login</a>
+    ```
+  </Tab>
+</Tabs>
+
+## Best Practices
+
+<Note>
+  - **Use static configuration** for parameters that apply to all users (e.g., audience, default scopes)
+  - **Use dynamic parameters** for user-specific flows (e.g., connection, screen_hint)
+  - **Validate parameters** when accepting user input to prevent injection attacks
+  - **Keep scopes minimal** - only request permissions you need
+  - **Test different flows** to ensure parameters work as expected
+  - **Document your parameters** so your team understands the authentication flows
+</Note>
+
+## Security Considerations
+
+<Warning>
+  - **Never trust user input** for critical parameters like `audience` or `scope` without validation
+  - **Whitelist connections** if accepting `connection` as user input
+  - **Sanitize redirect URLs** to prevent open redirect vulnerabilities
+  - **Use HTTPS** in production to protect authorization parameters in transit
+</Warning>
+
+## Troubleshooting
+
+### Parameters not working
+
+If parameters aren't being applied:
+
+1. **Check parameter spelling** - Parameters are case-sensitive
+2. **Verify Auth0 configuration** - Some parameters require specific Auth0 settings
+3. **Check precedence** - Query parameters override static configuration
+4. **Inspect the authorize URL** - Check browser network tab to see actual parameters sent
+
+### Invalid connection error
+
+If you see "connection not found" errors:
+- Verify the connection name is correct (e.g., `google-oauth2`, not `google`)
+- Ensure the connection is enabled in your Auth0 Dashboard
+- Check that the connection is allowed for your application
+
+### Organization not found
+
+If organization login fails:
+- Verify the organization ID is correct
+- Ensure the organization is enabled
+- Check that the user has access to the organization
+- Confirm organization features are enabled in your Auth0 plan

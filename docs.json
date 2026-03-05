@@ -1,122 +1,155 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mint Starter Kit",
+  "name": "Auth0 Next.js SDK",
+  "theme": "palm",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#848c8e",
+    "light": "#11161e",
+    "dark": "#cfd0d2"
   },
-  "favicon": "/favicon.svg",
+  "favicon": "https://media.brand.dev/2b01fe20-c04b-4a1d-a2f9-1d2789c50a7a.jpg",
+  "logo": {
+    "light": "https://media.brand.dev/5ffd6ce4-2434-4b4b-920a-f8cacac8b48b.svg",
+    "dark": "https://media.brand.dev/5ffd6ce4-2434-4b4b-920a-f8cacac8b48b.svg"
+  },
+  "navbar": {
+    "primary": {
+      "type": "github",
+      "href": "https://github.com/auth0/nextjs-auth0"
+    }
+  },
+  "footer": {
+    "socials": {
+      "github": "https://github.com/auth0/nextjs-auth0"
+    }
+  },
   "navigation": {
     "tabs": [
       {
-        "tab": "Guides",
+        "tab": "Documentation",
         "groups": [
           {
-            "group": "Getting started",
+            "group": "Get Started",
             "pages": [
-              "index",
-              "quickstart",
-              "development"
+              "introduction",
+              "installation",
+              "quickstart"
             ]
           },
           {
-            "group": "Customization",
+            "group": "Core Concepts",
             "pages": [
-              "essentials/settings",
-              "essentials/navigation"
+              "concepts/authentication-flow",
+              "concepts/session-management",
+              "concepts/routes"
             ]
           },
           {
-            "group": "Writing content",
+            "group": "Client API",
             "pages": [
-              "essentials/markdown",
-              "essentials/code",
-              "essentials/images",
-              "essentials/reusable-snippets"
+              "client/overview",
+              "client/use-user",
+              "client/get-access-token",
+              "client/auth0-provider",
+              "client/with-page-auth-required"
             ]
           },
           {
-            "group": "AI tools",
+            "group": "Server API",
             "pages": [
-              "ai-tools/cursor",
-              "ai-tools/claude-code",
-              "ai-tools/windsurf"
+              "server/overview",
+              "server/auth0-client",
+              "server/get-session",
+              "server/get-access-token",
+              "server/update-session",
+              "server/session-stores",
+              "server/with-page-auth-required"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/protecting-pages",
+              "guides/protecting-api-routes",
+              "guides/logout",
+              "guides/authorization-parameters",
+              "guides/customizing-auth-handlers",
+              "guides/session-configuration",
+              "guides/cookie-configuration"
+            ]
+          },
+          {
+            "group": "Advanced Features",
+            "pages": [
+              "advanced/dpop",
+              "advanced/multi-resource-refresh-tokens",
+              "advanced/mfa",
+              "advanced/my-account-api-proxy",
+              "advanced/silent-authentication",
+              "advanced/backchannel-logout"
+            ]
+          },
+          {
+            "group": "Migration",
+            "pages": [
+              "migration/v4-migration-guide",
+              "migration/v3-migration-guide",
+              "migration/v2-migration-guide",
+              "migration/v1-migration-guide"
+            ]
+          },
+          {
+            "group": "Resources",
+            "pages": [
+              "resources/configuration",
+              "resources/error-handling",
+              "resources/troubleshooting",
+              "resources/security",
+              "resources/contributing"
             ]
           }
         ]
       },
       {
-        "tab": "API reference",
+        "tab": "API Reference",
         "groups": [
           {
-            "group": "API documentation",
+            "group": "Client",
             "pages": [
-              "api-reference/introduction"
+              "api/client/use-user",
+              "api/client/get-access-token",
+              "api/client/auth0-provider",
+              "api/client/with-page-auth-required"
             ]
           },
           {
-            "group": "Endpoint examples",
+            "group": "Server",
             "pages": [
-              "api-reference/endpoint/get",
-              "api-reference/endpoint/create",
-              "api-reference/endpoint/delete",
-              "api-reference/endpoint/webhook"
+              "api/server/auth0-client",
+              "api/server/abstract-session-store",
+              "api/server/transaction-store"
+            ]
+          },
+          {
+            "group": "Errors",
+            "pages": [
+              "api/errors/sdk-error",
+              "api/errors/oauth-errors",
+              "api/errors/dpop-errors",
+              "api/errors/mfa-errors"
+            ]
+          },
+          {
+            "group": "Types",
+            "pages": [
+              "api/types/session-data",
+              "api/types/user",
+              "api/types/token-set",
+              "api/types/configuration"
             ]
           }
         ]
       }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
-  "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
-  },
-  "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:hi@mintlify.com"
-      }
-    ],
-    "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://dashboard.mintlify.com"
-    }
-  },
-  "contextual": {
-    "options": [
-     "copy",
-     "view",
-     "chatgpt",
-     "claude",
-     "perplexity",
-     "mcp",
-     "cursor",
-     "vscode"
-   ]
-  },
-  "footer": {
-    "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
-    }
+    ]
   }
 }

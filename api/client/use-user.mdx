@@ -1,0 +1,124 @@
+---
+title: useUser
+description: React hook for accessing the authenticated user's profile
+---
+
+`useUser` is a React hook that retrieves the currently authenticated user's profile information. It fetches user data from the `/auth/profile` endpoint and provides loading and error states.
+
+## Usage
+
+```typescript
+import { useUser } from '@auth0/nextjs-auth0';
+
+function Profile() {
+  const { user, error, isLoading, invalidate } = useUser();
+
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!user) return <div>Not authenticated</div>;
+
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      <img src={user.picture} alt={user.name} />
+      <p>Email: {user.email}</p>
+    </div>
+  );
+}
+```
+
+## Signature
+
+```typescript
+function useUser(): {
+  user: User | null | undefined;
+  isLoading: boolean;
+  error: Error | null;
+  invalidate: () => void;
+}
+```
+
+## Return Value
+
+The hook returns an object with the following properties:
+
+<ResponseField name="user" type="User | null | undefined">
+  The authenticated user object, or `null` if not authenticated, or `undefined` if still loading.
+  
+  See the [User type](/api/types/user) for available properties.
+</ResponseField>
+
+<ResponseField name="isLoading" type="boolean">
+  `true` while the user profile is being fetched, `false` otherwise.
+</ResponseField>
+
+<ResponseField name="error" type="Error | null">
+  An error object if the profile fetch failed, or `null` if no error occurred.
+</ResponseField>
+
+<ResponseField name="invalidate" type="() => void">
+  Function to manually revalidate the user data. Useful for refreshing the profile after updates.
+  
+  ```typescript
+  const { invalidate } = useUser();
+  
+  // After updating user profile
+  await updateProfile(newData);
+  invalidate(); // Refresh the user data
+  ```
+</ResponseField>
+
+## User Type
+
+The `User` object contains standard OIDC profile claims:
+
+<ResponseField name="sub" type="string" required>
+  The user's unique identifier.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  The user's full name.
+</ResponseField>
+
+<ResponseField name="nickname" type="string">
+  The user's nickname.
+</ResponseField>
+
+<ResponseField name="given_name" type="string">
+  The user's given/first name.
+</ResponseField>
+
+<ResponseField name="family_name" type="string">
+  The user's family/last name.
+</ResponseField>
+
+<ResponseField name="picture" type="string">
+  URL of the user's profile picture.
+</ResponseField>
+
+<ResponseField name="email" type="string">
+  The user's email address.
+</ResponseField>
+
+<ResponseField name="email_verified" type="boolean">
+  Whether the user's email has been verified.
+</ResponseField>
+
+<ResponseField name="org_id" type="string">
+  The organization ID that the user belongs to. This field is populated when the user logs in through an organization.
+</ResponseField>
+
+## Configuration
+
+By default, the hook fetches from `/auth/profile`. You can customize this endpoint using the `NEXT_PUBLIC_PROFILE_ROUTE` environment variable:
+
+```bash
+NEXT_PUBLIC_PROFILE_ROUTE=/api/custom-profile
+```
+
+## Notes
+
+- The hook uses SWR for data fetching, which provides automatic caching and revalidation
+- The user data is shared across all `useUser()` calls in your application
+- You must wrap your application with `<Auth0Provider>` to use this hook
+- The hook makes a client-side fetch request, so it only works in React components

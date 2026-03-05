@@ -1,0 +1,643 @@
+---
+title: Error Handling
+description: Complete reference for Auth0 Next.js SDK error classes and error codes
+---
+
+The Auth0 Next.js SDK uses a hierarchical error class system for consistent error handling. All errors extend from the base `SdkError` class and include a `code` property for programmatic error identification.
+
+## Error Handling Pattern
+
+**Use error codes, not `instanceof`:**
+
+```typescript
+import { AccessTokenError, AccessTokenErrorCode } from "@auth0/nextjs-auth0/errors";
+
+try {
+  const { token } = await auth0.getAccessToken();
+} catch (error) {
+  if (error.code === AccessTokenErrorCode.MISSING_SESSION) {
+    // User is not authenticated
+    redirect("/auth/login");
+  } else if (error.code === AccessTokenErrorCode.MISSING_REFRESH_TOKEN) {
+    // No refresh token available
+    console.error("Cannot refresh token - user must re-authenticate");
+  }
+}
+```
+
+## Base Error Class
+
+### SdkError
+
+Base class for all SDK errors.
+
+```typescript
+abstract class SdkError extends Error {
+  public abstract code: string;
+}
+```
+
+**Properties:**
+- `code`: Unique error code for programmatic identification
+- `message`: Human-readable error description
+- `name`: Error class name
+
+## OAuth and Authorization Errors
+
+### OAuth2Error
+
+Errors from Auth0 in the `redirect_uri` callback that may contain reflected user input.
+
+<Warning>
+**Security:** Do not render `error` or `error_description` properties without properly escaping them to prevent XSS vulnerabilities.
+</Warning>
+
+```typescript
+try {
+  await auth0.handleCallback(request);
+} catch (error) {
+  if (error instanceof OAuth2Error) {
+    // Sanitize before displaying to users
+    console.error(`OAuth error [${error.code}]:`, error.message);
+  }
+}
+```
+
+**Properties:**
+- `code`: OAuth error code from Auth0
+- `message`: Error description
+
+### DiscoveryError
+
+**Code:** `discovery_error`
+
+Thrown when OpenID Connect discovery fails.
+
+```typescript
+try {
+  const auth0 = new Auth0Client({ domain: "invalid-domain" });
+} catch (error) {
+  if (error.code === "discovery_error") {
+    console.error("Failed to discover OIDC configuration");
+  }
+}
+```
+
+### MissingStateError
+
+**Code:** `missing_state`
+
+The `state` parameter is missing from the callback.
+
+### InvalidStateError
+
+**Code:** `invalid_state`
+
+The `state` parameter in the callback is invalid or doesn't match.
+
+### InvalidConfigurationError
+
+**Code:** `invalid_configuration`
+
+The SDK configuration is invalid or incomplete.
+
+```typescript
+try {
+  const auth0 = new Auth0Client({}); // Missing required config
+} catch (error) {
+  if (error.code === "invalid_configuration") {
+    console.error("Invalid SDK configuration:", error.message);
+  }
+}
+```
+
+### AuthorizationError
+
+**Code:** `authorization_error`
+
+An error occurred during the authorization flow.
+
+**Properties:**
+- `cause`: The underlying `OAuth2Error`
+
+```typescript
+try {
+  await auth0.handleCallback(request);
+} catch (error) {
+  if (error.code === "authorization_error") {
+    console.error("Authorization failed:", error.cause?.message);
+  }
+}
+```
+
+### AuthorizationCodeGrantRequestError
+
+**Code:** `authorization_code_grant_request_error`
+
+Error occurred while preparing or performing the authorization code grant request.
+
+### AuthorizationCodeGrantError
+
+**Code:** `authorization_code_grant_error`
+
+Error occurred while exchanging the authorization code for tokens.
+
+**Properties:**
+- `cause`: The underlying `OAuth2Error`
+
+### BackchannelLogoutError
+
+**Code:** `backchannel_logout_error`
+
+Error occurred during backchannel logout request processing.
+
+### BackchannelAuthenticationNotSupportedError
+
+**Code:** `backchannel_authentication_not_supported_error`
+
+The authorization server does not support backchannel authentication.
+
+```typescript
+try {
+  await auth0.backchannelAuthentication(params);
+} catch (error) {
+  if (error.code === "backchannel_authentication_not_supported_error") {
+    console.error("Enable CIBA in Auth0 Dashboard:", error.message);
+  }
+}
+```
+
+### BackchannelAuthenticationError
+
+**Code:** `backchannel_authentication_error`
+
+Error when using Client-Initiated Backchannel Authentication.
+
+**Properties:**
+- `cause`: The underlying `OAuth2Error` (optional)
+
+## Access Token Errors
+
+### AccessTokenError
+
+Errors related to access token retrieval or refresh.
+
+**Error codes:**
+
+| Code | Value | Description |
+|------|-------|-------------|
+| `MISSING_SESSION` | `missing_session` | User session not found |
+| `MISSING_REFRESH_TOKEN` | `missing_refresh_token` | No refresh token available for refresh |
+| `FAILED_TO_REFRESH_TOKEN` | `failed_to_refresh_token` | Token refresh request failed |
+
+```typescript
+import { AccessTokenError, AccessTokenErrorCode } from "@auth0/nextjs-auth0/errors";
+
+try {
+  const { token } = await auth0.getAccessToken();
+} catch (error) {
+  if (error instanceof AccessTokenError) {
+    switch (error.code) {
+      case AccessTokenErrorCode.MISSING_SESSION:
+        redirect("/auth/login");
+        break;
+      case AccessTokenErrorCode.MISSING_REFRESH_TOKEN:
+        console.error("Re-authentication required");
+        break;
+      case AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN:
+        console.error("Token refresh failed:", error.cause);
+        break;
+    }
+  }
+}
+```
+
+**Properties:**
+- `code`: Error code from `AccessTokenErrorCode`
+- `cause`: The underlying `OAuth2Error` (optional)
+
+### AccessTokenForConnectionError
+
+Errors related to access tokens for specific connections.
+
+**Error codes:**
+
+| Code | Value | Description |
+|------|-------|-------------|
+| `MISSING_SESSION` | `missing_session` | User session not found |
+| `MISSING_REFRESH_TOKEN` | `missing_refresh_token` | No refresh token for connection |
+| `FAILED_TO_EXCHANGE` | `failed_to_exchange_refresh_token` | Failed to exchange refresh token |
+
+```typescript
+import { AccessTokenForConnectionError, AccessTokenForConnectionErrorCode } from "@auth0/nextjs-auth0/errors";
+
+try {
+  const token = await auth0.getAccessTokenForConnection("google-oauth2");
+} catch (error) {
+  if (error instanceof AccessTokenForConnectionError) {
+    console.error(`Connection token error [${error.code}]:`, error.message);
+  }
+}
+```
+
+**Properties:**
+- `code`: Error code from `AccessTokenForConnectionErrorCode`
+- `cause`: The underlying `OAuth2Error` (optional)
+
+### CustomTokenExchangeError
+
+Errors during custom token exchange operations.
+
+**Error codes:**
+
+| Code | Value | Description |
+|------|-------|-------------|
+| `MISSING_SUBJECT_TOKEN` | `missing_subject_token` | Subject token is missing or empty |
+| `INVALID_SUBJECT_TOKEN_TYPE` | `invalid_subject_token_type` | Invalid subject token type URI |
+| `MISSING_ACTOR_TOKEN_TYPE` | `missing_actor_token_type` | Actor token provided without type |
+| `EXCHANGE_FAILED` | `exchange_failed` | Token exchange request failed |
+
+```typescript
+import { CustomTokenExchangeError, CustomTokenExchangeErrorCode } from "@auth0/nextjs-auth0/errors";
+
+try {
+  await auth0.customTokenExchange(params);
+} catch (error) {
+  if (error instanceof CustomTokenExchangeError) {
+    console.error(`Token exchange error [${error.code}]:`, error.message);
+  }
+}
+```
+
+**Properties:**
+- `code`: Error code from `CustomTokenExchangeErrorCode`
+- `cause`: The underlying `OAuth2Error` (optional)
+
+## DPoP Errors
+
+### DPoPError
+
+Errors during DPoP (Demonstrating Proof-of-Possession) operations.
+
+**Error codes:**
+
+| Code | Value | Description |
+|------|-------|-------------|
+| `DPOP_JKT_CALCULATION_FAILED` | `dpop_jkt_calculation_failed` | Failed to calculate JWK thumbprint |
+| `DPOP_KEY_EXPORT_FAILED` | `dpop_key_export_failed` | Failed to export public key to JWK |
+| `DPOP_CONFIGURATION_ERROR` | `dpop_configuration_error` | Invalid DPoP configuration |
+
+```typescript
+import { DPoPError, DPoPErrorCode } from "@auth0/nextjs-auth0/errors";
+
+try {
+  const auth0 = new Auth0Client({
+    useDPoP: true,
+    dpopKeyPair: invalidKeyPair
+  });
+} catch (error) {
+  if (error instanceof DPoPError) {
+    switch (error.code) {
+      case DPoPErrorCode.DPOP_KEY_EXPORT_FAILED:
+        console.error("Invalid key format:", error.cause);
+        break;
+      case DPoPErrorCode.DPOP_JKT_CALCULATION_FAILED:
+        console.error("JWK thumbprint calculation failed:", error.cause);
+        break;
+      case DPoPErrorCode.DPOP_CONFIGURATION_ERROR:
+        console.error("Invalid DPoP configuration:", error.message);
+        break;
+    }
+  }
+}
+```
+
+**Properties:**
+- `code`: Error code from `DPoPErrorCode`
+- `cause`: The underlying error (optional)
+
+## MFA Errors
+
+### MfaRequiredError
+
+**Code:** `mfa_required`
+
+Thrown when `getAccessToken()` requires MFA step-up authentication.
+
+```typescript
+import { MfaRequiredError } from "@auth0/nextjs-auth0/errors";
+
+try {
+  const { token } = await auth0.getAccessToken({ audience: "https://api.example.com" });
+} catch (error) {
+  if (error instanceof MfaRequiredError) {
+    // Redirect to MFA challenge page with encrypted token
+    redirect(`/mfa?token=${error.mfa_token}`);
+  }
+}
+```
+
+**Properties:**
+- `code`: `mfa_required`
+- `error`: `mfa_required`
+- `error_description`: Error description from Auth0
+- `mfa_token`: Encrypted MFA token for use with MFA API methods
+- `mfa_requirements`: Available challenge/enrollment methods (optional)
+- `cause`: Underlying error (optional)
+
+**JSON serialization:**
+
+```typescript
+// Automatically serializes for HTTP responses
+return Response.json(error, { status: 401 });
+// Returns: { error: "mfa_required", error_description: "...", mfa_token: "..." }
+```
+
+### InvalidRequestError
+
+**Code:** `invalid_request`
+
+Request validation failed (missing or invalid parameters).
+
+```typescript
+try {
+  await mfa.verify({ mfaToken: "", otp: "123456" });
+} catch (error) {
+  if (error.code === "invalid_request") {
+    return Response.json(error, { status: 400 });
+  }
+}
+```
+
+### MfaGetAuthenticatorsError
+
+Failed to list MFA authenticators.
+
+```typescript
+import { MfaGetAuthenticatorsError } from "@auth0/nextjs-auth0/errors";
+
+try {
+  const authenticators = await mfa.getAuthenticators({ mfaToken });
+} catch (error) {
+  if (error instanceof MfaGetAuthenticatorsError) {
+    console.error(error.error); // 'invalid_token', 'expired_token', etc.
+    console.error(error.error_description);
+    if (error.cause) {
+      console.error("Auth0 API error:", error.cause);
+    }
+  }
+}
+```
+
+**Properties:**
+- `error`: Auth0 error code
+- `error_description`: Error description
+- `cause`: Original Auth0 API error response (optional)
+
+### MfaChallengeError
+
+Failed to initiate an MFA challenge.
+
+```typescript
+import { MfaChallengeError } from "@auth0/nextjs-auth0/errors";
+
+try {
+  await mfa.challenge({
+    mfaToken,
+    challengeType: "oob",
+    authenticatorId: "sms|dev_abc123"
+  });
+} catch (error) {
+  if (error instanceof MfaChallengeError) {
+    if (error.cause?.error === "invalid_authenticator_id") {
+      console.error("Authenticator not found or not active");
+    }
+  }
+}
+```
+
+**Properties:**
+- `error`: Auth0 error code
+- `error_description`: Error description
+- `cause`: Original Auth0 API error response (optional)
+
+### MfaVerifyError
+
+MFA verification failed.
+
+```typescript
+import { MfaVerifyError } from "@auth0/nextjs-auth0/errors";
+
+try {
+  await mfa.verify({ mfaToken, otp: "123456" });
+} catch (error) {
+  if (error instanceof MfaVerifyError) {
+    if (error.cause?.error === "invalid_grant") {
+      console.error("Invalid or expired verification code");
+    }
+  }
+}
+```
+
+**Properties:**
+- `error`: Auth0 error code
+- `error_description`: Error description
+- `cause`: Original Auth0 API error response (optional)
+
+### MfaEnrollmentError
+
+MFA enrollment failed.
+
+```typescript
+import { MfaEnrollmentError } from "@auth0/nextjs-auth0/errors";
+
+try {
+  await mfa.enroll({ mfaToken, authenticatorTypes: ["otp"] });
+} catch (error) {
+  if (error instanceof MfaEnrollmentError) {
+    if (error.cause?.error === "unsupported_challenge_type") {
+      console.error("Tenant does not support OTP enrollment");
+    }
+  }
+}
+```
+
+**Properties:**
+- `error`: Auth0 error code
+- `error_description`: Error description
+- `cause`: Original Auth0 API error response (optional)
+
+### MfaNoAvailableFactorsError
+
+**Code:** `mfa_no_available_factors`
+
+No MFA factors are available for challenge. This is an SDK-generated error with no Auth0 API equivalent.
+
+### MfaTokenExpiredError
+
+**Code:** `mfa_token_expired`
+
+The MFA token has expired. The user must restart the MFA flow.
+
+```typescript
+try {
+  await auth0.completeMfaChallenge(mfaToken, code);
+} catch (error) {
+  if (error.code === "mfa_token_expired") {
+    redirect("/auth/login?prompt=mfa");
+  }
+}
+```
+
+### MfaTokenInvalidError
+
+**Code:** `mfa_token_invalid`
+
+The encrypted MFA token is invalid or has been tampered with.
+
+## My Account API Errors
+
+### MyAccountApiError
+
+**Code:** `my_account_api_error`
+
+Error from Auth0's My Account API.
+
+```typescript
+import { MyAccountApiError } from "@auth0/nextjs-auth0/errors";
+
+try {
+  await fetch("/me/v1/profile");
+} catch (error) {
+  if (error instanceof MyAccountApiError) {
+    console.error(`${error.title}: ${error.detail}`);
+    console.error(`Status: ${error.status}`);
+    if (error.validationErrors) {
+      error.validationErrors.forEach(e => {
+        console.error(`  - ${e.field}: ${e.detail}`);
+      });
+    }
+  }
+}
+```
+
+**Properties:**
+- `code`: `my_account_api_error`
+- `type`: Error type
+- `title`: Error title
+- `detail`: Error detail
+- `status`: HTTP status code
+- `validationErrors`: Array of validation errors (optional)
+
+### ConnectAccountError
+
+Error during account linking flow.
+
+**Error codes:**
+
+| Code | Value | Description |
+|------|-------|-------------|
+| `MISSING_SESSION` | `missing_session` | User session not found |
+| `FAILED_TO_INITIATE` | `failed_to_initiate` | Failed to initiate connect flow |
+| `FAILED_TO_COMPLETE` | `failed_to_complete` | Failed to complete connect flow |
+
+```typescript
+import { ConnectAccountError, ConnectAccountErrorCodes } from "@auth0/nextjs-auth0/errors";
+
+try {
+  await auth0.connectAccount(connection);
+} catch (error) {
+  if (error instanceof ConnectAccountError) {
+    console.error(`Connect error [${error.code}]:`, error.message);
+    if (error.cause) {
+      console.error("API error:", error.cause);
+    }
+  }
+}
+```
+
+**Properties:**
+- `code`: Error code from `ConnectAccountErrorCodes`
+- `cause`: The underlying `MyAccountApiError` (optional)
+
+## Error Response Format
+
+Many errors implement `toJSON()` for consistent HTTP response formatting:
+
+```typescript
+try {
+  await auth0.getAccessToken();
+} catch (error) {
+  if (error instanceof MfaRequiredError) {
+    // Response.json() automatically calls toJSON()
+    return Response.json(error, { status: 401 });
+    // Returns:
+    // {
+    //   "error": "mfa_required",
+    //   "error_description": "Multi-factor authentication required",
+    //   "mfa_token": "encrypted-token",
+    //   "mfa_requirements": { ... }
+    // }
+  }
+}
+```
+
+## Importing Errors
+
+```typescript
+// Import from /errors path
+import {
+  SdkError,
+  AccessTokenError,
+  AccessTokenErrorCode,
+  MfaRequiredError,
+  InvalidConfigurationError,
+  DPoPError,
+  DPoPErrorCode
+} from "@auth0/nextjs-auth0/errors";
+```
+
+## Best Practices
+
+<AccordionGroup>
+  <Accordion title="Use error codes, not instanceof">
+    Error codes are more reliable and work across module boundaries.
+    
+    ```typescript
+    // Good
+    if (error.code === AccessTokenErrorCode.MISSING_SESSION) { ... }
+    
+    // Avoid
+    if (error instanceof AccessTokenError) { ... }
+    ```
+  </Accordion>
+  
+  <Accordion title="Always sanitize OAuth2Error messages">
+    OAuth errors may contain user input. Never render them directly.
+    
+    ```typescript
+    if (error instanceof OAuth2Error) {
+      // Sanitize before displaying
+      const safe = escapeHtml(error.message);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Check error.cause for details">
+    Many errors include a `cause` property with the underlying error.
+    
+    ```typescript
+    if (error.code === AccessTokenErrorCode.FAILED_TO_REFRESH_TOKEN) {
+      console.error("OAuth error:", error.cause?.message);
+    }
+    ```
+  </Accordion>
+  
+  <Accordion title="Use toJSON() for API responses">
+    Errors with `toJSON()` are designed for HTTP responses.
+    
+    ```typescript
+    return Response.json(error, { status: 400 });
+    ```
+  </Accordion>
+</AccordionGroup>

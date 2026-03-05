@@ -1,0 +1,537 @@
+---
+title: OAuth Errors
+description: OAuth 2.0 and OpenID Connect related errors in the Auth0 Next.js SDK
+---
+
+## Overview
+
+OAuth errors are thrown during various stages of the OAuth 2.0 and OpenID Connect authentication flows. All OAuth error classes extend from [`SdkError`](/api/errors/sdk-error) and can be caught using their specific error codes.
+
+## OAuth2Error
+
+Generic OAuth 2.0 error from the authorization server. This error may contain reflected user input via OpenID Connect `error` and `error_description` query parameters.
+
+<Warning>
+  **Security Notice**: Never render the `message`, `error`, or `error_description` properties without properly escaping them first, as they may contain reflected user input.
+</Warning>
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  The OAuth 2.0 error code from the authorization server (e.g., `"access_denied"`, `"invalid_grant"`, `"server_error"`).
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Error message from the authorization server or the default message: "An error occurred while interacting with the authorization server."
+</ResponseField>
+
+### Usage
+
+```typescript
+import { OAuth2Error } from '@auth0/nextjs-auth0/errors';
+
+try {
+  // OAuth flow operations
+} catch (error) {
+  if (error instanceof OAuth2Error) {
+    console.error(`OAuth2 error [${error.code}]:`, error.message);
+  }
+}
+```
+
+## DiscoveryError
+
+Thrown when the SDK fails to retrieve the OpenID Connect configuration from the authorization server's discovery endpoint.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"discovery_error"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Default: "Discovery failed for the OpenID Connect configuration."
+</ResponseField>
+
+### When Thrown
+
+- The authorization server's `.well-known/openid-configuration` endpoint is unreachable
+- The discovery response is malformed or invalid
+- Network connectivity issues during discovery
+
+### Example
+
+```typescript
+try {
+  await auth0.login();
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'discovery_error') {
+      console.error('Failed to discover OIDC configuration');
+      // Check AUTH0_DOMAIN is correct
+      // Verify network connectivity
+    }
+  }
+}
+```
+
+## MissingStateError
+
+Thrown when the OAuth callback is missing the required `state` parameter.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"missing_state"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Default: "The state parameter is missing."
+</ResponseField>
+
+### When Thrown
+
+- The authorization server callback doesn't include a `state` parameter
+- The callback URL was manipulated or corrupted
+
+## InvalidStateError
+
+Thrown when the OAuth callback's `state` parameter doesn't match the expected value stored in the transaction.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"invalid_state"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Default: "The state parameter is invalid."
+</ResponseField>
+
+### When Thrown
+
+- CSRF attack attempt detected
+- State parameter was modified
+- Transaction cookie expired or was cleared
+- Multiple concurrent login attempts from the same browser
+
+### Example
+
+```typescript
+try {
+  await auth0.handleCallback(req);
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'invalid_state') {
+      // Potential CSRF attack or expired transaction
+      redirect('/auth/login?error=invalid_state');
+    }
+  }
+}
+```
+
+## InvalidConfigurationError
+
+Thrown when the SDK is initialized with invalid configuration options.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"invalid_configuration"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Default: "The configuration is invalid."
+</ResponseField>
+
+### When Thrown
+
+- Missing required environment variables (`AUTH0_DOMAIN`, `AUTH0_CLIENT_ID`, `AUTH0_CLIENT_SECRET`, `AUTH0_SECRET`)
+- Invalid configuration values (e.g., malformed URLs, invalid algorithm)
+- Incompatible configuration combinations
+
+### Example
+
+```typescript
+try {
+  const auth0 = new Auth0Client({
+    domain: '', // Invalid: empty domain
+    clientId: 'abc123',
+    clientSecret: 'secret',
+    secret: 'cookie-secret'
+  });
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'invalid_configuration') {
+      console.error('SDK configuration is invalid:', error.message);
+    }
+  }
+}
+```
+
+## AuthorizationError
+
+Thrown when an error occurs during the authorization flow. Contains the underlying `OAuth2Error` as its cause.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"authorization_error"`
+</ResponseField>
+
+<ResponseField name="cause" type="OAuth2Error" required>
+  The underlying OAuth 2.0 error from the authorization server.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Default: "An error occurred during the authorization flow."
+</ResponseField>
+
+### When Thrown
+
+- User denies authorization
+- Invalid scopes requested
+- Authorization server configuration issues
+
+### Example
+
+```typescript
+try {
+  await auth0.handleCallback(req);
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'authorization_error') {
+      const authError = error as AuthorizationError;
+      console.error('Authorization failed:', authError.cause.code);
+      
+      if (authError.cause.code === 'access_denied') {
+        // User denied consent
+        redirect('/auth/consent-required');
+      }
+    }
+  }
+}
+```
+
+## AuthorizationCodeGrantRequestError
+
+Thrown when preparing or performing the authorization code grant request fails.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"authorization_code_grant_request_error"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Default: "An error occurred while preparing or performing the authorization code grant request."
+</ResponseField>
+
+### When Thrown
+
+- Network errors during token exchange
+- Invalid request format
+- Authorization server unreachable
+
+## AuthorizationCodeGrantError
+
+Thrown when the authorization code exchange fails. Contains the underlying `OAuth2Error` as its cause.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"authorization_code_grant_error"`
+</ResponseField>
+
+<ResponseField name="cause" type="OAuth2Error" required>
+  The underlying OAuth 2.0 error from the token endpoint.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Default: "An error occurred while trying to exchange the authorization code."
+</ResponseField>
+
+### When Thrown
+
+- Invalid authorization code
+- Expired authorization code
+- Code already used (replay attack)
+- Code verifier mismatch (PKCE)
+
+### Example
+
+```typescript
+try {
+  await auth0.handleCallback(req);
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'authorization_code_grant_error') {
+      const grantError = error as AuthorizationCodeGrantError;
+      
+      if (grantError.cause.code === 'invalid_grant') {
+        // Code expired or already used
+        redirect('/auth/login?error=code_expired');
+      }
+    }
+  }
+}
+```
+
+## BackchannelLogoutError
+
+Thrown when completing a backchannel logout request fails.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"backchannel_logout_error"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Default: "An error occurred while completing the backchannel logout request."
+</ResponseField>
+
+### When Thrown
+
+- Invalid logout token
+- Signature verification fails
+- Session not found
+
+## BackchannelAuthenticationNotSupportedError
+
+Thrown when attempting to use Client-Initiated Backchannel Authentication (CIBA) but the authorization server doesn't support it.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"backchannel_authentication_not_supported_error"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  "The authorization server does not support backchannel authentication. Learn how to enable it here: https://auth0.com/docs/get-started/applications/configure-client-initiated-backchannel-authentication"
+</ResponseField>
+
+### When Thrown
+
+- CIBA is not enabled in your Auth0 tenant
+- OIDC discovery doesn't include backchannel authentication endpoint
+
+### Example
+
+```typescript
+try {
+  await auth0.backchannelAuthentication({ loginHint: 'user@example.com' });
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'backchannel_authentication_not_supported_error') {
+      console.error('CIBA is not enabled for this tenant');
+      // Fall back to standard authentication flow
+      redirect('/auth/login');
+    }
+  }
+}
+```
+
+## BackchannelAuthenticationError
+
+Thrown when a Client-Initiated Backchannel Authentication request fails.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  Always `"backchannel_authentication_error"`
+</ResponseField>
+
+<ResponseField name="cause" type="OAuth2Error | undefined">
+  The underlying OAuth 2.0 error, if available.
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  "There was an error when trying to use Client-Initiated Backchannel Authentication."
+</ResponseField>
+
+### When Thrown
+
+- Invalid login hint
+- User not found
+- Authentication device not available
+
+## AccessTokenError
+
+Thrown when retrieving or refreshing an access token fails. See [Access Token Error Codes](#access-token-error-codes) for specific error codes.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  One of: `"missing_session"`, `"missing_refresh_token"`, or `"failed_to_refresh_token"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Error-specific message describing what went wrong.
+</ResponseField>
+
+<ResponseField name="cause" type="OAuth2Error | undefined">
+  The underlying OAuth 2.0 error when `code` is `"failed_to_refresh_token"`.
+</ResponseField>
+
+### Access Token Error Codes
+
+```typescript
+enum AccessTokenErrorCode {
+  MISSING_SESSION = "missing_session",
+  MISSING_REFRESH_TOKEN = "missing_refresh_token",
+  FAILED_TO_REFRESH_TOKEN = "failed_to_refresh_token"
+}
+```
+
+### When Thrown
+
+- **`missing_session`**: No active session exists (user not logged in)
+- **`missing_refresh_token`**: Session exists but doesn't contain a refresh token (offline_access scope not requested)
+- **`failed_to_refresh_token`**: Token refresh request failed (expired refresh token, revoked token, network error)
+
+### Example
+
+```typescript
+import { getAccessToken } from '@auth0/nextjs-auth0/server';
+
+try {
+  const { accessToken } = await getAccessToken();
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    switch (error.code) {
+      case 'missing_session':
+        // Not logged in - redirect to login
+        redirect('/auth/login');
+        break;
+      
+      case 'missing_refresh_token':
+        // No refresh token - need to re-authenticate
+        console.error('Refresh token not available. Ensure offline_access scope is requested.');
+        redirect('/auth/login');
+        break;
+      
+      case 'failed_to_refresh_token':
+        // Refresh failed - might be expired or revoked
+        console.error('Failed to refresh token:', error.cause?.code);
+        redirect('/auth/login');
+        break;
+    }
+  }
+}
+```
+
+## AccessTokenForConnectionError
+
+Thrown when retrieving or exchanging an access token for a specific connection fails.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  One of: `"missing_session"`, `"missing_refresh_token"`, or `"failed_to_exchange_refresh_token"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Error-specific message describing what went wrong.
+</ResponseField>
+
+<ResponseField name="cause" type="OAuth2Error | undefined">
+  The underlying OAuth 2.0 error when exchange fails.
+</ResponseField>
+
+### Error Codes
+
+```typescript
+enum AccessTokenForConnectionErrorCode {
+  MISSING_SESSION = "missing_session",
+  MISSING_REFRESH_TOKEN = "missing_refresh_token",
+  FAILED_TO_EXCHANGE = "failed_to_exchange_refresh_token"
+}
+```
+
+### Example
+
+```typescript
+import { getAccessTokenForConnection } from '@auth0/nextjs-auth0/server';
+
+try {
+  const { accessToken } = await getAccessTokenForConnection({
+    connection: 'google-oauth2'
+  });
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    if (error.code === 'failed_to_exchange_refresh_token') {
+      console.error('Failed to get connection access token');
+    }
+  }
+}
+```
+
+## CustomTokenExchangeError
+
+Thrown when a custom token exchange operation fails.
+
+### Properties
+
+<ResponseField name="code" type="string" required>
+  One of: `"missing_subject_token"`, `"invalid_subject_token_type"`, `"missing_actor_token_type"`, or `"exchange_failed"`
+</ResponseField>
+
+<ResponseField name="message" type="string" required>
+  Error-specific message describing the validation failure or exchange error.
+</ResponseField>
+
+<ResponseField name="cause" type="OAuth2Error | undefined">
+  The underlying OAuth 2.0 error when exchange fails.
+</ResponseField>
+
+### Error Codes
+
+```typescript
+enum CustomTokenExchangeErrorCode {
+  MISSING_SUBJECT_TOKEN = "missing_subject_token",
+  INVALID_SUBJECT_TOKEN_TYPE = "invalid_subject_token_type",
+  MISSING_ACTOR_TOKEN_TYPE = "missing_actor_token_type",
+  EXCHANGE_FAILED = "exchange_failed"
+}
+```
+
+### When Thrown
+
+- **`missing_subject_token`**: The `subject_token` is missing or empty
+- **`invalid_subject_token_type`**: The `subject_token_type` is not a valid URI, wrong length, or uses a reserved namespace
+- **`missing_actor_token_type`**: The `actor_token` was provided without `actor_token_type`
+- **`exchange_failed`**: The token exchange request failed
+
+### Example
+
+```typescript
+import { customTokenExchange } from '@auth0/nextjs-auth0/server';
+
+try {
+  const result = await customTokenExchange({
+    subjectToken: 'external-token',
+    subjectTokenType: 'urn:ietf:params:oauth:token-type:access_token'
+  });
+} catch (error) {
+  if (error && typeof error === 'object' && 'code' in error) {
+    switch (error.code) {
+      case 'missing_subject_token':
+        console.error('Subject token is required');
+        break;
+      case 'invalid_subject_token_type':
+        console.error('Subject token type must be a valid URI');
+        break;
+      case 'exchange_failed':
+        console.error('Token exchange failed:', error.cause?.code);
+        break;
+    }
+  }
+}
+```
+
+## Related
+
+- [SdkError](/api/errors/sdk-error) - Base error class
+- [DPoP Errors](/api/errors/dpop-errors) - DPoP-specific errors
+- [MFA Errors](/api/errors/mfa-errors) - Multi-factor authentication errors

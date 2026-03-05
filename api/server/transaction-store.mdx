@@ -1,0 +1,305 @@
+---
+title: TransactionStore
+description: Manages authentication transaction state using encrypted cookies
+---
+
+The `TransactionStore` is responsible for storing the state required to successfully complete an authentication transaction. The store relies on encrypted, stateless cookies to store the transaction state.
+
+## Overview
+
+During the OAuth/OIDC authentication flow, the SDK needs to maintain state between the initial authorization request and the callback. The `TransactionStore` manages this state using encrypted cookies.
+
+**Key Features:**
+- Stateless encrypted cookie storage
+- Support for parallel authentication transactions
+- PKCE code verifier storage
+- Return URL preservation
+- State parameter management
+
+## Constructor
+
+```typescript
+import { TransactionStore } from '@auth0/nextjs-auth0/server';
+
+const store = new TransactionStore(options: TransactionStoreOptions);
+```
+
+### Options
+
+<ParamField path="secret" type="string" required>
+  A 32-byte, hex-encoded secret used for encrypting transaction cookies.
+</ParamField>
+
+<ParamField path="cookieOptions" type="TransactionCookieOptions">
+  Configuration options for the transaction cookie.
+</ParamField>
+
+<ParamField path="cookieOptions.prefix" type="string" default="__txn_">
+  The prefix of the cookie used to store the transaction state.
+  
+  When `enableParallelTransactions` is true, the cookie name will be `{prefix}{state}`. When false, the cookie name will be `{prefix}`.
+</ParamField>
+
+<ParamField path="cookieOptions.sameSite" type="'strict' | 'lax' | 'none'" default="lax">
+  The sameSite attribute of the transaction cookie.
+  
+  Required to allow the cookie to be sent on the callback request.
+</ParamField>
+
+<ParamField path="cookieOptions.secure" type="boolean">
+  The secure attribute of the transaction cookie.
+  
+  Default: depends on the protocol of the application's base URL. If the protocol is `https`, then `true`, otherwise `false`.
+</ParamField>
+
+<ParamField path="cookieOptions.path" type="string" default="/">
+  The path attribute of the transaction cookie.
+</ParamField>
+
+<ParamField path="cookieOptions.domain" type="string">
+  Specifies the value for the Domain Set-Cookie attribute. By default, no domain is set, and most clients will consider the cookie to apply to only the current domain.
+</ParamField>
+
+<ParamField path="cookieOptions.maxAge" type="number" default={3600}>
+  The expiration time for transaction cookies in seconds.
+  
+  Default: 1 hour (3600 seconds).
+</ParamField>
+
+<ParamField path="enableParallelTransactions" type="boolean" default={true}>
+  Controls whether multiple parallel login transactions are allowed.
+  
+  - When `true` (default): Multiple transaction cookies can coexist for multi-tab support. Each transaction gets a unique cookie name based on the state parameter.
+  - When `false`: Only one transaction cookie is maintained at a time. Attempting to start a new transaction while one exists will be ignored.
+</ParamField>
+
+## Methods
+
+### save
+
+```typescript
+save(
+  resCookies: ResponseCookies,
+  transactionState: TransactionState,
+  reqCookies?: RequestCookies
+): Promise<void>
+```
+
+Saves the transaction state to an encrypted cookie.
+
+<ParamField path="resCookies" type="ResponseCookies" required>
+  The response cookies object to set the transaction cookie on.
+</ParamField>
+
+<ParamField path="transactionState" type="TransactionState" required>
+  The transaction state to save.
+</ParamField>
+
+<ParamField path="reqCookies" type="RequestCookies">
+  Optional request cookies to check for existing transactions. When provided and `enableParallelTransactions` is false, will check for existing transaction cookies. When omitted, the existence check is skipped for performance optimization.
+</ParamField>
+
+**Throws:**
+- `Error` when transaction state is missing required state parameter
+
+### get
+
+```typescript
+get(
+  reqCookies: RequestCookies,
+  state: string
+): Promise<TransactionState | null>
+```
+
+Retrieves the transaction state from the encrypted cookie.
+
+<ParamField path="reqCookies" type="RequestCookies" required>
+  The request cookies object.
+</ParamField>
+
+<ParamField path="state" type="string" required>
+  The state parameter from the authorization callback.
+</ParamField>
+
+<ResponseField name="transactionState" type="Promise<TransactionState | null>">
+  Returns the transaction state or `null` if no transaction exists or the cookie is invalid/expired.
+</ResponseField>
+
+### delete
+
+```typescript
+delete(
+  resCookies: ResponseCookies,
+  state: string
+): Promise<void>
+```
+
+Deletes the transaction cookie for a specific state.
+
+<ParamField path="resCookies" type="ResponseCookies" required>
+  The response cookies object.
+</ParamField>
+
+<ParamField path="state" type="string" required>
+  The state parameter identifying the transaction to delete.
+</ParamField>
+
+### deleteAll
+
+```typescript
+deleteAll(
+  reqCookies: RequestCookies,
+  resCookies: ResponseCookies
+): Promise<void>
+```
+
+Deletes all transaction cookies based on the configured prefix.
+
+<ParamField path="reqCookies" type="RequestCookies" required>
+  The request cookies object.
+</ParamField>
+
+<ParamField path="resCookies" type="ResponseCookies" required>
+  The response cookies object.
+</ParamField>
+
+### getCookiePrefix
+
+```typescript
+getCookiePrefix(): string
+```
+
+Returns the configured prefix for transaction cookies.
+
+<ResponseField name="prefix" type="string">
+  The transaction cookie prefix.
+</ResponseField>
+
+## TransactionState Type
+
+```typescript
+interface TransactionState {
+  codeVerifier: string;      // PKCE code verifier
+  responseType: RESPONSE_TYPES;
+  state: string;             // OAuth state parameter
+  returnTo: string;          // URL to redirect to after login
+  nonce?: string;            // Nonce for ID token validation
+  maxAge?: number;           // Maximum age of authentication session
+  authSession?: string;      // Auth session ID for connect accounts
+  scope?: string;            // Requested scope for this transaction
+  audience?: string;         // Audience for this transaction
+}
+```
+
+<ResponseField name="codeVerifier" type="string">
+  The PKCE code verifier used in the authorization request.
+</ResponseField>
+
+<ResponseField name="responseType" type="RESPONSE_TYPES">
+  The response type used in the authorization request.
+</ResponseField>
+
+<ResponseField name="state" type="string">
+  The state parameter passed to the authorization server for CSRF protection.
+</ResponseField>
+
+<ResponseField name="returnTo" type="string">
+  The URL to redirect to after successful login.
+</ResponseField>
+
+<ResponseField name="nonce" type="string">
+  A string value used to associate a client session with an ID Token, and to mitigate replay attacks.
+</ResponseField>
+
+<ResponseField name="maxAge" type="number">
+  The maximum age of the authentication session.
+</ResponseField>
+
+<ResponseField name="authSession" type="string">
+  The auth session ID for connect accounts flow.
+</ResponseField>
+
+<ResponseField name="scope" type="string">
+  The scope requested for this transaction.
+</ResponseField>
+
+<ResponseField name="audience" type="string">
+  The audience used for this transaction.
+</ResponseField>
+
+## Example Usage
+
+The `TransactionStore` is typically used internally by the SDK, but you can access it if needed:
+
+```typescript
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+const auth0 = new Auth0Client({
+  transactionCookie: {
+    prefix: '__auth_txn_',
+    secure: true,
+    sameSite: 'lax',
+    maxAge: 3600,
+    path: '/'
+  },
+  enableParallelTransactions: true
+});
+```
+
+## Parallel Transactions
+
+When `enableParallelTransactions` is enabled (default), the SDK can handle multiple concurrent authentication flows. This is useful for:
+
+- **Multi-tab support**: Users can initiate login in multiple browser tabs simultaneously
+- **Multiple authentication contexts**: Different parts of your app can trigger separate auth flows
+- **Connect accounts**: Users can connect additional accounts while authenticated
+
+Each transaction gets a unique cookie: `{prefix}{state}`, where `state` is the OAuth state parameter.
+
+### Example: Multi-tab Login
+
+```typescript
+// Tab 1: User clicks login
+// Creates cookie: __txn_abc123
+
+// Tab 2: User clicks login (before Tab 1 completes)
+// Creates cookie: __txn_def456
+
+// Both tabs can complete their login independently
+```
+
+### Single Transaction Mode
+
+If you disable parallel transactions:
+
+```typescript
+const auth0 = new Auth0Client({
+  enableParallelTransactions: false
+});
+```
+
+Only one transaction can be active at a time. If a user attempts to start a new login while one is in progress, the new attempt will be silently ignored with a console warning.
+
+## Security Considerations
+
+1. **Encryption**: Transaction cookies are always encrypted using the `secret` parameter.
+
+2. **Expiration**: Transaction cookies have a limited lifetime (default 1 hour) to prevent stale transactions.
+
+3. **State Parameter**: The state parameter provides CSRF protection for the OAuth flow.
+
+4. **Secure Cookies**: In production, transaction cookies should always use the `secure` attribute.
+
+5. **SameSite**: The `lax` SameSite attribute is required to allow the cookie to be sent on the callback request.
+
+## Best Practices
+
+1. **Keep Default Settings**: The default configuration is secure and suitable for most applications.
+
+2. **Enable Parallel Transactions**: Unless you have specific requirements, keep parallel transactions enabled for better user experience.
+
+3. **Set Appropriate Expiration**: The default 1-hour expiration is reasonable for most cases. Adjust based on your authentication flow requirements.
+
+4. **Use HTTPS**: Always use HTTPS in production to ensure cookies are transmitted securely.
+
+5. **Cookie Path**: Set the cookie path to the most restrictive scope needed for your authentication routes.

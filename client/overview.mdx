@@ -1,0 +1,212 @@
+---
+title: Client API Overview
+description: Client-side authentication utilities for Auth0 Next.js SDK
+---
+
+The client API provides React hooks, components, and utilities for implementing Auth0 authentication in Next.js client components and pages.
+
+## Installation
+
+```bash
+npm install @auth0/nextjs-auth0
+```
+
+## Available Exports
+
+The client API is available from the main package export:
+
+```typescript
+import {
+  useUser,
+  getAccessToken,
+  Auth0Provider,
+  withPageAuthRequired
+} from '@auth0/nextjs-auth0';
+```
+
+## Core Features
+
+### Hooks
+
+<CardGroup cols={1}>
+  <Card title="useUser" icon="user" href="./use-user">
+    React hook to access the authenticated user's profile and session state
+  </Card>
+</CardGroup>
+
+### Helpers
+
+<CardGroup cols={1}>
+  <Card title="getAccessToken" icon="key" href="./get-access-token">
+    Fetch access tokens for calling external APIs from client components
+  </Card>
+  <Card title="withPageAuthRequired" icon="shield" href="./with-page-auth-required">
+    Higher-order component to protect client-side rendered pages
+  </Card>
+</CardGroup>
+
+### Providers
+
+<CardGroup cols={1}>
+  <Card title="Auth0Provider" icon="react" href="./auth0-provider">
+    Context provider for optimizing user data fetching with SWR
+  </Card>
+</CardGroup>
+
+## Quick Start
+
+### 1. Wrap Your App with Auth0Provider
+
+For optimal performance, wrap your application with `Auth0Provider` in your root layout:
+
+```tsx app/layout.tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import { auth0 } from '@/lib/auth0';
+
+export default async function RootLayout({
+  children
+}: {
+  children: React.ReactNode;
+}) {
+  const session = await auth0.getSession();
+
+  return (
+    <html lang="en">
+      <body>
+        <Auth0Provider user={session?.user}>
+          {children}
+        </Auth0Provider>
+      </body>
+    </html>
+  );
+}
+```
+
+### 2. Access User Data
+
+Use the `useUser` hook in any client component:
+
+```tsx app/profile/page.tsx
+"use client";
+
+import { useUser } from '@auth0/nextjs-auth0';
+
+export default function Profile() {
+  const { user, isLoading, error } = useUser();
+
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!user) return <div>Not authenticated</div>;
+
+  return (
+    <div>
+      <h1>Welcome, {user.name}!</h1>
+      <img src={user.picture} alt={user.name} />
+    </div>
+  );
+}
+```
+
+### 3. Fetch Access Tokens
+
+Call external APIs with access tokens:
+
+```tsx app/components/data-fetcher.tsx
+"use client";
+
+import { getAccessToken } from '@auth0/nextjs-auth0';
+
+export default function DataFetcher() {
+  async function fetchData() {
+    try {
+      const token = await getAccessToken();
+      
+      const response = await fetch('https://api.example.com/data', {
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      
+      const data = await response.json();
+      console.log(data);
+    } catch (error) {
+      console.error('Failed to fetch data:', error);
+    }
+  }
+
+  return <button onClick={fetchData}>Fetch Data</button>;
+}
+```
+
+### 4. Protect Client Pages
+
+Use `withPageAuthRequired` to protect client-side rendered pages:
+
+```tsx app/dashboard/page.tsx
+"use client";
+
+import { withPageAuthRequired } from '@auth0/nextjs-auth0';
+
+function Dashboard({ user }) {
+  return (
+    <div>
+      <h1>Dashboard</h1>
+      <p>Welcome, {user.name}!</p>
+    </div>
+  );
+}
+
+export default withPageAuthRequired(Dashboard);
+```
+
+## Client vs Server API
+
+The Auth0 Next.js SDK provides both client-side and server-side APIs:
+
+| Feature | Client API | Server API |
+|---------|-----------|------------|
+| **Import Path** | `@auth0/nextjs-auth0` | `@auth0/nextjs-auth0/server` |
+| **Use Case** | Client components, browser | Server components, API routes, middleware |
+| **User Access** | `useUser()` hook | `getSession()` method |
+| **Token Fetching** | `getAccessToken()` (calls `/auth/access-token`) | `getAccessToken()` (direct token access) |
+| **Page Protection** | `withPageAuthRequired` (CSR) | `withPageAuthRequired` (SSR) |
+
+## Environment Variables
+
+You can customize the API routes used by client utilities:
+
+```bash .env.local
+# Default: /auth/profile
+NEXT_PUBLIC_PROFILE_ROUTE=/api/auth/profile
+
+# Default: /auth/access-token
+NEXT_PUBLIC_ACCESS_TOKEN_ROUTE=/api/auth/access-token
+
+# Default: /auth/login
+NEXT_PUBLIC_LOGIN_ROUTE=/api/auth/login
+```
+
+## TypeScript Support
+
+All client exports include full TypeScript type definitions:
+
+```typescript
+import type { User, WithPageAuthRequiredOptions } from '@auth0/nextjs-auth0';
+```
+
+## Next Steps
+
+<CardGroup cols={2}>
+  <Card title="useUser Hook" icon="user" href="./use-user">
+    Learn how to access user data in client components
+  </Card>
+  <Card title="Get Access Tokens" icon="key" href="./get-access-token">
+    Fetch tokens for calling external APIs
+  </Card>
+  <Card title="Protect Pages" icon="shield" href="./with-page-auth-required">
+    Secure client-side rendered pages
+  </Card>
+  <Card title="Server API" icon="server" href="/server/overview">
+    Explore server-side authentication utilities
+  </Card>
+</CardGroup>

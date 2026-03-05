@@ -1,0 +1,449 @@
+---
+title: Session Stores
+description: Configure stateless or stateful session storage
+---
+
+The SDK supports two session storage strategies: stateless (cookie-based) and stateful (database-backed).
+
+## Session Store Types
+
+### Stateless Sessions (Default)
+
+Session data is encrypted and stored in cookies. No external storage required.
+
+**Advantages:**
+- No database dependency
+- Simple setup
+- Serverless-friendly
+
+**Limitations:**
+- Cookie size limit (~4KB)
+- Cannot revoke sessions server-side
+- Not suitable for large sessions
+
+### Stateful Sessions
+
+Session data is stored in an external database. Cookies only contain a session ID.
+
+**Advantages:**
+- No cookie size limits
+- Server-side session revocation
+- Better for large sessions with multiple tokens
+
+**Limitations:**
+- Requires database setup
+- Additional latency for database queries
+
+## Default Configuration
+
+By default, the SDK uses stateless sessions:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+// Uses StatelessSessionStore by default
+export const auth0 = new Auth0Client();
+```
+
+## Implementing Stateful Sessions
+
+### SessionDataStore Interface
+
+Implement the `SessionDataStore` interface to create a custom session store:
+
+```typescript
+import { SessionData } from '@auth0/nextjs-auth0/types';
+
+interface SessionDataStore {
+  /**
+   * Get session data by ID
+   */
+  get(id: string): Promise<SessionData | null>;
+
+  /**
+   * Set session data
+   */
+  set(id: string, session: SessionData): Promise<void>;
+
+  /**
+   * Delete session by ID
+   */
+  delete(id: string): Promise<void>;
+}
+```
+
+### Redis Example
+
+```typescript lib/redis-store.ts
+import { SessionDataStore, SessionData } from '@auth0/nextjs-auth0/types';
+import { createClient } from 'redis';
+
+const redis = createClient({
+  url: process.env.REDIS_URL
+});
+
+await redis.connect();
+
+export class RedisStore implements SessionDataStore {
+  private ttl = 60 * 60 * 24 * 7; // 7 days
+
+  async get(id: string): Promise<SessionData | null> {
+    const data = await redis.get(`session:${id}`);
+    return data ? JSON.parse(data) : null;
+  }
+
+  async set(id: string, session: SessionData): Promise<void> {
+    await redis.set(
+      `session:${id}`,
+      JSON.stringify(session),
+      { EX: this.ttl }
+    );
+  }
+
+  async delete(id: string): Promise<void> {
+    await redis.del(`session:${id}`);
+  }
+}
+```
+
+### PostgreSQL Example
+
+```typescript lib/postgres-store.ts
+import { SessionDataStore, SessionData } from '@auth0/nextjs-auth0/types';
+import { Pool } from 'pg';
+
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL
+});
+
+// Create sessions table
+await pool.query(`
+  CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    data JSONB NOT NULL,
+    expires_at TIMESTAMP NOT NULL
+  )
+`);
+
+export class PostgresStore implements SessionDataStore {
+  async get(id: string): Promise<SessionData | null> {
+    const result = await pool.query(
+      'SELECT data FROM sessions WHERE id = $1 AND expires_at > NOW()',
+      [id]
+    );
+    
+    return result.rows[0]?.data || null;
+  }
+
+  async set(id: string, session: SessionData): Promise<void> {
+    const expiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days
+    );
+
+    await pool.query(
+      `INSERT INTO sessions (id, data, expires_at) 
+       VALUES ($1, $2, $3) 
+       ON CONFLICT (id) 
+       DO UPDATE SET data = $2, expires_at = $3`,
+      [id, JSON.stringify(session), expiresAt]
+    );
+  }
+
+  async delete(id: string): Promise<void> {
+    await pool.query('DELETE FROM sessions WHERE id = $1', [id]);
+  }
+}
+```
+
+### MongoDB Example
+
+```typescript lib/mongo-store.ts
+import { SessionDataStore, SessionData } from '@auth0/nextjs-auth0/types';
+import { MongoClient } from 'mongodb';
+
+const client = new MongoClient(process.env.MONGODB_URI!);
+await client.connect();
+
+const db = client.db('auth');
+const sessions = db.collection('sessions');
+
+// Create TTL index for automatic cleanup
+await sessions.createIndex(
+  { expiresAt: 1 },
+  { expireAfterSeconds: 0 }
+);
+
+export class MongoStore implements SessionDataStore {
+  async get(id: string): Promise<SessionData | null> {
+    const doc = await sessions.findOne({ _id: id });
+    return doc?.data || null;
+  }
+
+  async set(id: string, session: SessionData): Promise<void> {
+    const expiresAt = new Date(
+      Date.now() + 7 * 24 * 60 * 60 * 1000 // 7 days
+    );
+
+    await sessions.updateOne(
+      { _id: id },
+      { $set: { data: session, expiresAt } },
+      { upsert: true }
+    );
+  }
+
+  async delete(id: string): Promise<void> {
+    await sessions.deleteOne({ _id: id });
+  }
+}
+```
+
+### DynamoDB Example
+
+```typescript lib/dynamodb-store.ts
+import { SessionDataStore, SessionData } from '@auth0/nextjs-auth0/types';
+import { DynamoDBClient } from '@aws-sdk/client-dynamodb';
+import { DynamoDBDocumentClient, GetCommand, PutCommand, DeleteCommand } from '@aws-sdk/lib-dynamodb';
+
+const client = new DynamoDBClient({});
+const docClient = DynamoDBDocumentClient.from(client);
+
+const TABLE_NAME = 'Sessions';
+
+export class DynamoDBStore implements SessionDataStore {
+  async get(id: string): Promise<SessionData | null> {
+    const result = await docClient.send(
+      new GetCommand({
+        TableName: TABLE_NAME,
+        Key: { id }
+      })
+    );
+
+    if (!result.Item || result.Item.expiresAt < Date.now()) {
+      return null;
+    }
+
+    return result.Item.data as SessionData;
+  }
+
+  async set(id: string, session: SessionData): Promise<void> {
+    const expiresAt = Date.now() + 7 * 24 * 60 * 60 * 1000; // 7 days
+
+    await docClient.send(
+      new PutCommand({
+        TableName: TABLE_NAME,
+        Item: {
+          id,
+          data: session,
+          expiresAt
+        }
+      })
+    );
+  }
+
+  async delete(id: string): Promise<void> {
+    await docClient.send(
+      new DeleteCommand({
+        TableName: TABLE_NAME,
+        Key: { id }
+      })
+    );
+  }
+}
+```
+
+## Configuring the Session Store
+
+Provide your custom store to the `Auth0Client` constructor:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+import { RedisStore } from './redis-store';
+
+export const auth0 = new Auth0Client({
+  sessionStore: new RedisStore(),
+  session: {
+    rolling: true,
+    absoluteDuration: 60 * 60 * 24 * 7, // 7 days
+    inactivityDuration: 60 * 60 * 24    // 1 day
+  }
+});
+```
+
+## Session Configuration
+
+Configure session behavior regardless of storage type:
+
+<ParamField path="session.rolling" type="boolean" default={true}>
+  Enable rolling sessions. When enabled, the session is extended on each request.
+</ParamField>
+
+<ParamField path="session.absoluteDuration" type="number" default={259200}>
+  Absolute session lifetime in seconds (default: 3 days).
+</ParamField>
+
+<ParamField path="session.inactivityDuration" type="number" default={86400}>
+  Inactivity timeout in seconds (default: 1 day).
+</ParamField>
+
+<ParamField path="session.cookie" type="SessionCookieOptions">
+  Cookie configuration options:
+  
+  ```typescript
+  cookie: {
+    name: '__session',
+    secure: true,
+    sameSite: 'lax',
+    path: '/',
+    domain: '.example.com',
+    transient: false
+  }
+  ```
+</ParamField>
+
+## Cookie Configuration
+
+For stateless sessions, the entire session is stored in the cookie. For stateful sessions, only the session ID is stored.
+
+### Cookie Options
+
+```typescript
+const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      name: '__session',        // Cookie name
+      secure: true,             // HTTPS only
+      sameSite: 'lax',         // CSRF protection
+      path: '/',                // Cookie path
+      domain: '.example.com',   // Cookie domain
+      transient: false          // Session cookie
+    }
+  }
+});
+```
+
+### Environment Variables
+
+Cookie options can also be configured via environment variables:
+
+```bash
+AUTH0_COOKIE_DOMAIN=.example.com
+AUTH0_COOKIE_PATH=/
+AUTH0_COOKIE_TRANSIENT=false
+AUTH0_COOKIE_SECURE=true
+AUTH0_COOKIE_SAME_SITE=lax
+```
+
+## Session Lifecycle
+
+### Session Creation
+
+Sessions are created after successful authentication:
+
+1. User completes authentication
+2. SDK receives tokens from Auth0
+3. Session is created with:
+   - User profile
+   - Token set (access, ID, refresh)
+   - Internal metadata (creation timestamp)
+4. Session is stored:
+   - **Stateless:** Encrypted in cookie
+   - **Stateful:** Stored in database, ID in cookie
+
+### Session Updates
+
+Sessions are updated when:
+- Tokens are refreshed via `getAccessToken()`
+- Session data is modified via `updateSession()`
+- Rolling sessions extend on each request
+
+### Session Expiration
+
+Sessions expire based on:
+1. **Absolute Duration:** Maximum lifetime from creation
+2. **Inactivity Duration:** Maximum time without activity
+
+The earlier of these two determines expiration.
+
+### Session Deletion
+
+Sessions are deleted when:
+- User logs out via `/auth/logout`
+- Session expires
+- `delete()` is called on the session store
+
+## Session Store Comparison
+
+| Feature | Stateless | Stateful (Redis) | Stateful (DB) |
+|---------|-----------|------------------|---------------|
+| Setup complexity | Simple | Moderate | Moderate |
+| External dependency | None | Redis | Database |
+| Cookie size | Large (~4KB) | Small (~100B) | Small (~100B) |
+| Session size limit | 4KB | Unlimited | Unlimited |
+| Server-side revocation | ❌ No | ✅ Yes | ✅ Yes |
+| Latency | Low | Low | Moderate |
+| Serverless-friendly | ✅ Yes | ⚠️ Requires connection | ⚠️ Requires connection |
+| Horizontal scaling | ✅ Stateless | ✅ Centralized | ✅ Centralized |
+
+## Best Practices
+
+<Note>
+  **Use stateless sessions for most applications.** They're simple, fast, and serverless-friendly.
+</Note>
+
+<Warning>
+  **Use stateful sessions when:**
+  - Sessions exceed 4KB (many MRRT tokens)
+  - Server-side revocation is required
+  - You need to track active sessions
+</Warning>
+
+<Note>
+  **Implement session cleanup** in your database to prevent orphaned sessions:
+  
+  ```sql
+  -- PostgreSQL example
+  DELETE FROM sessions WHERE expires_at < NOW();
+  ```
+</Note>
+
+<Warning>
+  **Secure your session store.** Use encrypted connections and restrict access to the session database.
+</Warning>
+
+## Session Security
+
+### Encryption
+
+- **Stateless:** All session data is encrypted with `AUTH0_SECRET`
+- **Stateful:** Session ID is encrypted, store data as needed
+
+### Cookie Security
+
+```typescript
+const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      secure: true,      // HTTPS only
+      sameSite: 'lax',   // CSRF protection
+      httpOnly: true     // Always true (XSS protection)
+    }
+  }
+});
+```
+
+### Session Fixation Prevention
+
+When using stateful sessions, the SDK automatically:
+- Regenerates session IDs on login
+- Deletes old sessions
+
+## Related Topics
+
+<CardGroup cols={2}>
+  <Card title="getSession" icon="id-card" href="/server/get-session">
+    Retrieve session data
+  </Card>
+  <Card title="updateSession" icon="pen-to-square" href="/server/update-session">
+    Update session data
+  </Card>
+</CardGroup>

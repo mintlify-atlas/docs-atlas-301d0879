@@ -1,0 +1,439 @@
+---
+title: 'Silent Authentication'
+description: 'Learn how to implement silent authentication to check for existing Auth0 sessions without user interaction'
+---
+
+## Overview
+
+Silent authentication checks for an existing Auth0 session without user interaction. This is useful for seamlessly logging users back in when they return to your application, or for checking authentication status without redirecting to the login page.
+
+<Info>
+Silent authentication uses the `prompt: 'none'` authorization parameter to perform authentication without displaying the Auth0 login page.
+</Info>
+
+## How It Works
+
+When you initiate silent authentication:
+
+1. Your application redirects to Auth0's `/authorize` endpoint with `prompt=none`
+2. Auth0 checks for an active session without showing the login page
+3. If a session exists, Auth0 redirects back with tokens
+4. If no session exists, Auth0 returns an error (typically `login_required`)
+
+## Implementation Methods
+
+There are two ways to implement silent authentication:
+
+### Method 1: Using Query Parameters (Simplest)
+
+Add the `prompt=none` query parameter to the login URL:
+
+```html
+<a href="/auth/login?prompt=none">Silent Auth</a>
+```
+
+This is the simplest approach and works with the built-in `/auth/login` route.
+
+### Method 2: Custom Route (More Control)
+
+Create a custom route for more control over the authentication flow:
+
+<Steps>
+  <Step title="Create a custom silent auth route">
+    ```typescript app/api/auth/silent/route.ts
+    import { auth0 } from "@/lib/auth0";
+    import { NextRequest } from "next/server";
+
+    export const GET = async (req: NextRequest) => {
+      return auth0.startInteractiveLogin({
+        authorizationParameters: { prompt: "none" },
+        returnTo: req.nextUrl.searchParams.get("returnTo") || "/"
+      });
+    };
+    ```
+  </Step>
+
+  <Step title="Use the custom route">
+    ```typescript
+    // Redirect to custom silent auth route
+    window.location.href = "/api/auth/silent?returnTo=/dashboard";
+    ```
+  </Step>
+</Steps>
+
+## Error Handling
+
+Auth0 returns specific errors when silent authentication fails. The most common is `login_required`, which occurs when no active session exists.
+
+### Client-Side Error Handling
+
+```typescript app/components/SilentAuth.tsx
+"use client";
+
+import { useEffect, useState } from "react";
+
+export default function SilentAuth() {
+  const [status, setStatus] = useState<"checking" | "success" | "failed">("checking");
+
+  useEffect(() => {
+    async function attemptSilentAuth() {
+      try {
+        // Attempt silent authentication
+        window.location.href = "/auth/login?prompt=none&returnTo=/dashboard";
+      } catch (error) {
+        setStatus("failed");
+        console.error("Silent authentication failed:", error);
+      }
+    }
+
+    attemptSilentAuth();
+  }, []);
+
+  if (status === "checking") {
+    return <div>Checking authentication status...</div>;
+  }
+
+  if (status === "failed") {
+    return (
+      <div>
+        <p>Please log in to continue</p>
+        <a href="/auth/login">Log In</a>
+      </div>
+    );
+  }
+
+  return <div>Authenticated successfully</div>;
+}
+```
+
+### Server-Side Error Handling
+
+Handle silent authentication errors in a custom route:
+
+```typescript app/api/auth/silent/route.ts
+import { auth0 } from "@/lib/auth0";
+import { NextRequest, NextResponse } from "next/server";
+
+export const GET = async (req: NextRequest) => {
+  try {
+    return await auth0.startInteractiveLogin({
+      authorizationParameters: { prompt: "none" },
+      returnTo: req.nextUrl.searchParams.get("returnTo") || "/"
+    });
+  } catch (error) {
+    // Handle errors (e.g., login_required)
+    console.error("Silent authentication failed:", error);
+
+    // Redirect to interactive login
+    return NextResponse.redirect(
+      new URL("/auth/login", req.nextUrl.origin)
+    );
+  }
+};
+```
+
+## Common Error Codes
+
+| Error Code | Meaning | Action |
+|------------|---------|--------|
+| `login_required` | No active session exists | Redirect to interactive login |
+| `consent_required` | User consent is needed | Redirect to interactive login |
+| `interaction_required` | User interaction is required | Redirect to interactive login |
+| `account_selection_required` | Multiple accounts available | Redirect to interactive login |
+
+<Warning>
+All of these errors indicate that silent authentication cannot proceed and interactive authentication is required.
+</Warning>
+
+## Use Cases
+
+### Single Sign-On (SSO) Experience
+
+Automatically log users in if they have an active session:
+
+```typescript app/page.tsx
+import { auth0 } from "@/lib/auth0";
+import { redirect } from "next/navigation";
+
+export default async function Home() {
+  const session = await auth0.getSession();
+
+  if (!session) {
+    // Attempt silent authentication
+    redirect("/auth/login?prompt=none&returnTo=/");
+  }
+
+  return (
+    <main>
+      <h1>Welcome, {session.user.name}!</h1>
+    </main>
+  );
+}
+```
+
+### Session Refresh Without Interruption
+
+Refresh the user's session without showing the login page:
+
+```typescript app/components/SessionRefresh.tsx
+"use client";
+
+import { useEffect } from "react";
+
+export default function SessionRefresh() {
+  useEffect(() => {
+    // Refresh session every 30 minutes
+    const interval = setInterval(() => {
+      // Open silent auth in hidden iframe or window
+      const iframe = document.createElement("iframe");
+      iframe.style.display = "none";
+      iframe.src = "/auth/login?prompt=none";
+      document.body.appendChild(iframe);
+
+      // Clean up after authentication completes
+      setTimeout(() => {
+        document.body.removeChild(iframe);
+      }, 5000);
+    }, 30 * 60 * 1000); // 30 minutes
+
+    return () => clearInterval(interval);
+  }, []);
+
+  return null;
+}
+```
+
+<Warning>
+iframe-based silent authentication may not work if cookies are blocked by the browser's privacy settings. Consider using alternative session refresh strategies.
+</Warning>
+
+### Check Authentication Status
+
+Check if a user has an active Auth0 session:
+
+```typescript app/components/AuthCheck.tsx
+"use client";
+
+import { useUser } from "@auth0/nextjs-auth0";
+import { useEffect, useState } from "react";
+
+export default function AuthCheck() {
+  const { user, isLoading } = useUser();
+  const [hasAuth0Session, setHasAuth0Session] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    if (!isLoading && !user) {
+      // Check for Auth0 session without local session
+      checkAuth0Session();
+    }
+  }, [user, isLoading]);
+
+  async function checkAuth0Session() {
+    try {
+      const response = await fetch("/api/auth/check-session");
+      setHasAuth0Session(response.ok);
+    } catch {
+      setHasAuth0Session(false);
+    }
+  }
+
+  if (isLoading) return <div>Loading...</div>;
+
+  if (user) {
+    return <div>Logged in as {user.name}</div>;
+  }
+
+  if (hasAuth0Session === null) {
+    return <div>Checking Auth0 session...</div>;
+  }
+
+  if (hasAuth0Session) {
+    return (
+      <div>
+        <p>You have an active Auth0 session</p>
+        <a href="/auth/login?prompt=none">Resume Session</a>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      <p>No active session</p>
+      <a href="/auth/login">Log In</a>
+    </div>
+  );
+}
+```
+
+## Best Practices
+
+### 1. Fallback to Interactive Login
+
+Always provide a fallback to interactive login when silent authentication fails:
+
+```typescript
+try {
+  await silentAuth();
+} catch (error) {
+  // Redirect to interactive login
+  window.location.href = "/auth/login";
+}
+```
+
+### 2. Handle Privacy Settings
+
+Modern browsers may block third-party cookies, which can prevent silent authentication from working. Inform users and provide alternative options:
+
+```typescript
+if (error.code === "login_required") {
+  // Show message about privacy settings if needed
+  console.warn(
+    "Silent authentication may be blocked by browser privacy settings"
+  );
+}
+```
+
+### 3. Avoid Infinite Loops
+
+Be careful not to create infinite redirect loops:
+
+```typescript
+// ❌ Bad: Can create infinite loop
+if (!session) {
+  redirect("/auth/login?prompt=none");
+}
+
+// ✅ Good: Track attempts
+const silentAuthAttempted = cookies().get("silent_auth_attempted");
+if (!session && !silentAuthAttempted) {
+  cookies().set("silent_auth_attempted", "true", { maxAge: 60 });
+  redirect("/auth/login?prompt=none");
+}
+```
+
+### 4. Use Appropriate Timeouts
+
+Set reasonable timeouts for silent authentication attempts:
+
+```typescript
+const timeout = setTimeout(() => {
+  console.warn("Silent authentication timeout");
+  handleAuthFailure();
+}, 5000); // 5 second timeout
+
+try {
+  await attemptSilentAuth();
+  clearTimeout(timeout);
+} catch (error) {
+  clearTimeout(timeout);
+  handleAuthFailure();
+}
+```
+
+## Configuration Options
+
+You can pass additional authorization parameters alongside `prompt: 'none'`:
+
+```typescript
+await auth0.startInteractiveLogin({
+  authorizationParameters: {
+    prompt: "none",
+    // Optional: specify organization
+    organization: "org_abc123",
+    // Optional: specify connection
+    connection: "google-oauth2",
+    // Optional: specify audience
+    audience: "https://api.example.com",
+    // Optional: specify scopes
+    scope: "openid profile email read:data"
+  },
+  returnTo: "/dashboard"
+});
+```
+
+## Security Considerations
+
+### Cross-Site Request Forgery (CSRF)
+
+Silent authentication uses the same CSRF protections as interactive login:
+
+- State parameter is automatically generated and verified
+- Transaction cookies are used to maintain flow state
+- PKCE (Proof Key for Code Exchange) is used by default
+
+### Cookie Security
+
+Ensure your cookies are configured securely:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      secure: true, // Require HTTPS
+      sameSite: "lax", // CSRF protection
+      httpOnly: true // Prevent XSS
+    }
+  }
+});
+```
+
+<Warning>
+Always use secure cookies in production. Silent authentication will fail if cookies are not properly configured.
+</Warning>
+
+## Troubleshooting
+
+### Silent Authentication Always Fails
+
+**Possible causes:**
+
+1. **Third-party cookies blocked**: Modern browsers block third-party cookies by default
+2. **No active Auth0 session**: User has never logged in or session expired
+3. **Wrong domain**: Auth0 domain doesn't match the configured domain
+4. **Configuration issues**: Missing or incorrect authorization parameters
+
+**Solutions:**
+
+```typescript
+// Check browser cookie settings
+if (!navigator.cookieEnabled) {
+  console.error("Cookies are disabled");
+}
+
+// Verify Auth0 domain configuration
+console.log("AUTH0_DOMAIN:", process.env.AUTH0_DOMAIN);
+
+// Test with interactive login first
+await auth0.startInteractiveLogin({ authorizationParameters: {} });
+```
+
+### iframe Not Working
+
+**Problem**: Silent authentication in iframe doesn't complete
+
+**Solution**: Check CSP (Content Security Policy) headers and frame-ancestors:
+
+```typescript middleware.ts
+import { NextResponse } from "next/server";
+
+export function middleware(request: Request) {
+  const response = NextResponse.next();
+
+  // Allow Auth0 to load in iframe
+  response.headers.set(
+    "Content-Security-Policy",
+    "frame-ancestors 'self' https://*.auth0.com"
+  );
+
+  return response;
+}
+```
+
+## Further Reading
+
+- [Auth0 Silent Authentication Documentation](https://auth0.com/docs/authenticate/login/configure-silent-authentication)
+- [OAuth 2.0 prompt Parameter](https://openid.net/specs/openid-connect-core-1_0.html#AuthRequest)
+- [Session Management](/guides/session-management)
+- [Token Refresh Strategies](/guides/token-management)

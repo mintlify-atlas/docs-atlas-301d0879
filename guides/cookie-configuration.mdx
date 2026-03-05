@@ -1,0 +1,403 @@
+---
+title: Cookie Configuration
+description: Configure session cookies and transaction cookies for your Auth0 Next.js application.
+---
+
+Configure how the SDK manages cookies for sessions and authentication transactions. The SDK uses two types of cookies: session cookies and transaction cookies.
+
+## Session Cookie Configuration
+
+Session cookies store the encrypted user session. Configure session cookie attributes for security and functionality.
+
+### Using Environment Variables
+
+Set cookie options via environment variables in your `.env.local` file:
+
+```bash .env.local
+# Cookie Options
+AUTH0_COOKIE_DOMAIN='.example.com'  # Set cookie for subdomains
+AUTH0_COOKIE_PATH='/app'            # Limit cookie to /app path
+AUTH0_COOKIE_TRANSIENT=false        # Make cookie persistent
+AUTH0_COOKIE_SECURE=true            # Require HTTPS (recommended)
+AUTH0_COOKIE_SAME_SITE='Lax'        # CSRF protection
+```
+
+The SDK automatically picks up these values at runtime.
+
+<Note>
+  The `httpOnly` attribute is always set to `true` for security and cannot be configured.
+</Note>
+
+### Using Auth0Client Options
+
+Configure cookies programmatically when initializing the client:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      domain: ".example.com",
+      path: "/app",
+      transient: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax",
+      name: "appSession" // Optional: custom cookie name
+    }
+  }
+});
+```
+
+<Note>
+  Options provided in `Auth0ClientOptions` take precedence over environment variables.
+</Note>
+
+## Session Cookie Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `domain` | `string` | `undefined` | Cookie domain (e.g., `.example.com` for subdomains) |
+| `path` | `string` | `/` | URL path where cookie is valid |
+| `transient` | `boolean` | `false` | If `true`, cookie expires when browser closes |
+| `secure` | `boolean` | `false` | If `true`, cookie only sent over HTTPS |
+| `sameSite` | `"lax"` \| `"strict"` \| `"none"` | `"lax"` | CSRF protection level |
+| `name` | `string` | `"__session"` | Cookie name |
+| `httpOnly` | `boolean` | `true` | Always `true` (not configurable) |
+
+### Domain Configuration
+
+Set the cookie domain to share sessions across subdomains:
+
+```typescript
+export const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      domain: ".example.com" // Works for app.example.com, admin.example.com
+    }
+  }
+});
+```
+
+<Warning>
+  Setting `domain` to a parent domain allows all subdomains to access the cookie. Only use this when you control all subdomains.
+</Warning>
+
+### Path Configuration
+
+Limit cookie scope to specific paths:
+
+```typescript
+export const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      path: "/app" // Cookie only sent for /app/* routes
+    }
+  }
+});
+```
+
+### Transient Sessions
+
+Create session-only cookies that expire when the browser closes:
+
+```typescript
+export const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      transient: true // Cookie deleted when browser closes
+    }
+  }
+});
+```
+
+**Use cases:**
+- Shared/public computers
+- Enhanced security requirements
+- Temporary sessions
+
+### Secure Cookies
+
+Require HTTPS for cookie transmission:
+
+```typescript
+export const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      secure: process.env.NODE_ENV === "production"
+    }
+  }
+});
+```
+
+<Note>
+  When `appBaseUrl` is omitted in production, the SDK automatically enforces `secure: true`. Attempting to set `secure: false` will throw an `InvalidConfigurationError`.
+</Note>
+
+### SameSite Configuration
+
+Control when cookies are sent with cross-origin requests:
+
+```typescript
+export const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      sameSite: "lax" // "lax", "strict", or "none"
+    }
+  }
+});
+```
+
+**Options:**
+
+| Value | Behavior | Use Case |
+|-------|----------|----------|
+| `"lax"` | Sent on top-level navigation and same-site requests | **Recommended** - Balances security and usability |
+| `"strict"` | Only sent on same-site requests | High security, may break cross-origin flows |
+| `"none"` | Sent on all requests (requires `secure: true`) | Cross-origin scenarios, embedded apps |
+
+<Warning>
+  Using `sameSite: "none"` requires `secure: true` and HTTPS. Browsers reject insecure cookies with `SameSite=None`.
+</Warning>
+
+### Custom Cookie Name
+
+Use a custom name for the session cookie:
+
+```typescript
+export const auth0 = new Auth0Client({
+  session: {
+    cookie: {
+      name: "my_app_session" // Custom cookie name
+    }
+  }
+});
+```
+
+**Use cases:**
+- Multiple Auth0 apps on same domain
+- Avoiding name conflicts
+- Custom naming conventions
+
+## Transaction Cookie Configuration
+
+Transaction cookies maintain state during authentication flows (OAuth state parameter). Configure transaction cookie behavior to prevent issues with concurrent logins.
+
+### Basic Configuration
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  transactionCookie: {
+    maxAge: 1800, // 30 minutes (in seconds)
+    sameSite: "lax",
+    secure: true,
+    path: "/"
+  }
+});
+```
+
+### Transaction Cookie Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `maxAge` | `number` | `3600` (1 hour) | Expiration time in seconds |
+| `prefix` | `string` | `"__txn_"` | Cookie name prefix |
+| `sameSite` | `"lax"` \| `"strict"` \| `"none"` | `"lax"` | CSRF protection |
+| `secure` | `boolean` | Derived from `appBaseUrl` | Require HTTPS |
+| `path` | `string` | `/` | URL path |
+
+### Transaction Management Modes
+
+The SDK supports two transaction management modes:
+
+#### Parallel Transactions (Default)
+
+Allows multiple concurrent authentication flows:
+
+```typescript
+export const auth0 = new Auth0Client({
+  enableParallelTransactions: true // Default
+});
+```
+
+**How it works:**
+- Each login attempt gets a unique transaction cookie
+- Cookie named: `__txn_{state}`
+- Supports multiple tabs logging in simultaneously
+- Cookies cleaned up after successful authentication
+
+**Use when:**
+- Users might open multiple tabs and log in simultaneously
+- You want maximum compatibility with typical user behavior
+- Your application supports multiple concurrent authentication flows
+
+#### Single Transaction Mode
+
+Only one active transaction at a time:
+
+```typescript
+export const auth0 = new Auth0Client({
+  enableParallelTransactions: false
+});
+```
+
+**How it works:**
+- Single transaction cookie: `__txn_`
+- New login attempts replace the previous transaction
+- Simpler cookie management
+- Prevents cookie accumulation
+
+**Use when:**
+- You want to prevent cookie accumulation issues
+- You prefer simpler transaction management
+- Users typically don't need multiple concurrent login flows
+- You're experiencing cookie header size limits
+
+<Note>
+  Parallel transactions are recommended for most applications. Use single transaction mode only if you're experiencing cookie-related issues or have specific requirements.
+</Note>
+
+### Custom Transaction Cookie Prefix
+
+Customize the transaction cookie name prefix:
+
+```typescript
+export const auth0 = new Auth0Client({
+  transactionCookie: {
+    prefix: "auth_txn_" // Custom prefix
+  }
+});
+```
+
+Result:
+- Parallel mode: `auth_txn_{state}`
+- Single mode: `auth_txn_`
+
+### Transaction Cookie Expiration
+
+Control how long transaction cookies remain valid:
+
+```typescript
+export const auth0 = new Auth0Client({
+  transactionCookie: {
+    maxAge: 900 // 15 minutes
+  }
+});
+```
+
+<Warning>
+  Setting `maxAge` too low may cause authentication to fail if users take too long to complete the Auth0 login form.
+</Warning>
+
+## Dynamic Preview Environments
+
+For dynamic preview environments (Vercel, Netlify), you can omit `APP_BASE_URL` and let the SDK infer the base URL from the request:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+// No appBaseUrl - inferred from request
+export const auth0 = new Auth0Client();
+```
+
+**Automatic enforcement:**
+- In production, the SDK enforces `secure: true` for cookies
+- Attempting to set `secure: false` throws `InvalidConfigurationError`
+- Protects against misconfiguration in production
+
+<Note>
+  When using dynamic base URLs, ensure all possible callback and logout URLs are registered in your Auth0 Application settings. Auth0's Allowed URLs act as a security safeguard.
+</Note>
+
+## Complete Configuration Example
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  // Session configuration
+  session: {
+    rolling: true,
+    absoluteDuration: 60 * 60 * 24 * 7, // 7 days
+    inactivityDuration: 60 * 60 * 24,    // 1 day
+
+    // Session cookie configuration
+    cookie: {
+      name: "app_session",
+      domain: process.env.COOKIE_DOMAIN, // .example.com
+      path: "/",
+      transient: false,
+      secure: process.env.NODE_ENV === "production",
+      sameSite: "lax"
+    }
+  },
+
+  // Transaction cookie configuration
+  enableParallelTransactions: true,
+  transactionCookie: {
+    maxAge: 1800, // 30 minutes
+    prefix: "auth_txn_",
+    sameSite: "lax",
+    secure: process.env.NODE_ENV === "production",
+    path: "/"
+  }
+});
+```
+
+## Best Practices
+
+<Note>
+  - **Always use `secure: true` in production** to protect cookies from interception
+  - **Use `sameSite: "lax"`** for most applications (good balance of security and usability)
+  - **Set appropriate `domain`** only when sharing sessions across subdomains you control
+  - **Keep `maxAge` reasonable** for transaction cookies (15-60 minutes)
+  - **Use parallel transactions** unless you have specific reasons not to
+  - **Test cookie settings** in development to ensure they work as expected
+  - **Monitor cookie size** to stay within browser limits (4KB)
+</Note>
+
+## Security Considerations
+
+<Warning>
+  - **Never set `httpOnly: false`** - This is not allowed by the SDK for security reasons
+  - **Use `secure: true` in production** - Prevents cookie theft over insecure connections
+  - **Be cautious with `domain` settings** - Overly broad domains expose cookies to more subdomains
+  - **Use `sameSite` protection** - Prevents CSRF attacks
+  - **Validate dynamic base URLs** - Ensure Auth0 Allowed URLs are properly configured
+</Warning>
+
+## Troubleshooting
+
+### Cookies not being set
+
+If cookies aren't being set:
+- Check that `secure: true` is only used with HTTPS
+- Verify `sameSite: "none"` is paired with `secure: true`
+- Ensure `domain` is valid for your hostname
+- Check browser console for cookie warnings
+
+### Cookies not sent with requests
+
+If cookies aren't sent:
+- Verify `path` includes the request path
+- Check `domain` matches the request hostname
+- Ensure `sameSite` settings allow the request type
+- Check for third-party cookie blocking in browser
+
+### Session not persisting
+
+If sessions don't persist:
+- Check if `transient: true` (cookies expire on browser close)
+- Verify cookie expiration settings
+- Ensure middleware is running on requests
+- Check for cookie size limits (4KB max)
+
+### Transaction cookies accumulating
+
+If you see many transaction cookies:
+- Switch to single transaction mode: `enableParallelTransactions: false`
+- Reduce `maxAge` to clean up faster
+- Ensure authentication flows complete successfully
+- Check that callback route is processing correctly

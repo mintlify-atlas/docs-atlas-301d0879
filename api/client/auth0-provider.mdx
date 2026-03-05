@@ -1,0 +1,222 @@
+---
+title: Auth0Provider
+description: React context provider for Auth0 authentication
+---
+
+`Auth0Provider` is a React component that provides Auth0 authentication context to your application. It wraps your application and enables the use of client-side hooks like `useUser`.
+
+## Usage
+
+### App Router
+
+Wrap your root layout with `Auth0Provider`:
+
+```tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import { auth0 } from '@/lib/auth0';
+
+export default async function RootLayout({
+  children
+}: {
+  children: React.ReactNode;
+}) {
+  const session = await auth0.getSession();
+
+  return (
+    <html lang="en">
+      <body>
+        <Auth0Provider user={session?.user}>
+          {children}
+        </Auth0Provider>
+      </body>
+    </html>
+  );
+}
+```
+
+### Pages Router
+
+Wrap your `_app.tsx` with `Auth0Provider`:
+
+```tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import type { AppProps } from 'next/app';
+
+function MyApp({ Component, pageProps }: AppProps) {
+  return (
+    <Auth0Provider user={pageProps.user}>
+      <Component {...pageProps} />
+    </Auth0Provider>
+  );
+}
+
+export default MyApp;
+```
+
+Then pass the user in `getServerSideProps`:
+
+```tsx
+import { auth0 } from '@/lib/auth0';
+
+export async function getServerSideProps(context) {
+  const session = await auth0.getSession(context.req, context.res);
+
+  return {
+    props: {
+      user: session?.user || null
+    }
+  };
+}
+```
+
+## Signature
+
+```typescript
+function Auth0Provider({
+  user,
+  children
+}: {
+  user?: User;
+  children: React.ReactNode;
+}): React.ReactElement
+```
+
+## Props
+
+<ParamField path="user" type="User" optional>
+  The authenticated user object from the server-side session. This provides initial user data to avoid a loading state on first render.
+  
+  If not provided, `useUser()` will fetch the user client-side on mount.
+  
+  ```tsx
+  <Auth0Provider user={session?.user}>
+    {children}
+  </Auth0Provider>
+  ```
+</ParamField>
+
+<ParamField path="children" type="React.ReactNode" required>
+  Your application's component tree.
+  
+  ```tsx
+  <Auth0Provider>
+    <App />
+  </Auth0Provider>
+  ```
+</ParamField>
+
+## User Type
+
+The `User` type contains standard OIDC profile claims:
+
+```typescript
+interface User {
+  sub: string;                  // User ID (required)
+  name?: string;                // Full name
+  nickname?: string;            // Nickname
+  given_name?: string;          // First name
+  family_name?: string;         // Last name
+  picture?: string;             // Profile picture URL
+  email?: string;               // Email address
+  email_verified?: boolean;     // Email verification status
+  org_id?: string;              // Organization ID (if using Auth0 Organizations)
+  [key: string]: any;           // Additional custom claims
+}
+```
+
+## How It Works
+
+Under the hood, `Auth0Provider` uses [SWR](https://swr.vercel.app/) to manage user state:
+
+1. If a `user` prop is provided, it's used as the initial data (no loading state)
+2. The `useUser()` hook fetches from `/auth/profile` and caches the result
+3. All `useUser()` calls across your app share the same cached user data
+4. The cache automatically revalidates when the window regains focus or network reconnects
+
+## Configuration
+
+The profile endpoint can be customized using the `NEXT_PUBLIC_PROFILE_ROUTE` environment variable:
+
+```bash
+NEXT_PUBLIC_PROFILE_ROUTE=/api/custom-profile
+```
+
+## Example: Complete Setup
+
+### 1. Create Auth0 Client Instance
+
+```typescript
+// lib/auth0.ts
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+export const auth0 = new Auth0Client({
+  domain: process.env.AUTH0_DOMAIN!,
+  clientId: process.env.AUTH0_CLIENT_ID!,
+  clientSecret: process.env.AUTH0_CLIENT_SECRET!,
+  secret: process.env.AUTH0_SECRET!,
+  appBaseUrl: process.env.APP_BASE_URL!
+});
+```
+
+### 2. Wrap App with Provider (App Router)
+
+```tsx
+// app/layout.tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0';
+import { auth0 } from '@/lib/auth0';
+
+export default async function RootLayout({
+  children
+}: {
+  children: React.ReactNode;
+}) {
+  const session = await auth0.getSession();
+
+  return (
+    <html lang="en">
+      <body>
+        <Auth0Provider user={session?.user}>
+          <nav>
+            <UserMenu />
+          </nav>
+          <main>{children}</main>
+        </Auth0Provider>
+      </body>
+    </html>
+  );
+}
+```
+
+### 3. Use in Components
+
+```tsx
+// components/UserMenu.tsx
+'use client';
+
+import { useUser } from '@auth0/nextjs-auth0';
+
+export function UserMenu() {
+  const { user, isLoading } = useUser();
+
+  if (isLoading) return <div>Loading...</div>;
+
+  if (!user) {
+    return <a href="/auth/login">Log In</a>;
+  }
+
+  return (
+    <div>
+      <img src={user.picture} alt={user.name} />
+      <span>{user.name}</span>
+      <a href="/auth/logout">Log Out</a>
+    </div>
+  );
+}
+```
+
+## Notes
+
+- The `Auth0Provider` component must be marked with `"use client"` or used in a client component
+- Passing the `user` prop from server-side prevents a loading flash on initial render
+- The provider automatically handles caching and revalidation of user data
+- You only need one `Auth0Provider` at the root of your application

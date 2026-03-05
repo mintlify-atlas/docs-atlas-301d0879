@@ -1,0 +1,389 @@
+---
+title: Session Configuration
+description: Configure session timeouts, rolling sessions, and session storage for your Next.js application.
+---
+
+Configure how Auth0 manages user sessions in your Next.js application. The SDK provides flexible session configuration options including rolling sessions, custom timeouts, and database storage.
+
+## Basic Configuration
+
+Configure session settings when initializing the Auth0 client:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  session: {
+    rolling: true,
+    absoluteDuration: 60 * 60 * 24 * 30, // 30 days in seconds
+    inactivityDuration: 60 * 60 * 24 * 7  // 7 days in seconds
+  }
+});
+```
+
+## Configuration Options
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `rolling` | `boolean` | `true` | Enable rolling sessions (extends on activity) |
+| `absoluteDuration` | `number` | `259200` (3 days) | Maximum session lifetime in seconds |
+| `inactivityDuration` | `number` | `86400` (1 day) | Inactivity timeout in seconds |
+
+## Rolling Sessions
+
+Rolling sessions provide a seamless user experience by automatically extending session lifetime as users actively use your application.
+
+### How Rolling Sessions Work
+
+<Steps>
+  <Step title="Initial login">
+    User logs in and receives a session with expiration time set to `inactivityDuration`.
+  </Step>
+
+  <Step title="Active usage">
+    Each request extends the session by `inactivityDuration` as long as the session is within the `inactivityDuration` window.
+  </Step>
+
+  <Step title="Absolute limit">
+    Once `absoluteDuration` is reached, the session expires regardless of activity.
+  </Step>
+
+  <Step title="Inactive expiration">
+    If the user is inactive for longer than `inactivityDuration`, the session expires.
+  </Step>
+</Steps>
+
+**Example timeline:**
+
+```
+Absolute Duration: 30 days
+Inactivity Duration: 7 days
+
+Day 0:  User logs in
+Day 5:  User visits app → Session extended to Day 12
+Day 10: User visits app → Session extended to Day 17
+Day 25: User visits app → Session extended to Day 30 (absolute limit)
+Day 30: Session expires (absolute duration reached)
+```
+
+### Enabling Rolling Sessions
+
+Rolling sessions are **enabled by default**. To disable them:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from "@auth0/nextjs-auth0/server";
+
+export const auth0 = new Auth0Client({
+  session: {
+    rolling: false,
+    absoluteDuration: 60 * 60 * 24 * 30 // 30 days
+  }
+});
+```
+
+<Warning>
+  Disabling rolling sessions changes the user experience significantly. Users will be logged out after the absolute duration regardless of their activity level, requiring manual re-authentication.
+</Warning>
+
+### Middleware Requirement
+
+Rolling sessions **require** the authentication middleware to run on all requests.
+
+**✅ Correct Configuration:**
+
+```typescript middleware.ts
+export const config = {
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)"
+  ]
+};
+```
+
+**❌ Incorrect Configuration:**
+
+```typescript middleware.ts
+// This breaks rolling sessions!
+export const config = {
+  matcher: ["/dashboard/:path*", "/profile/:path*"]
+};
+```
+
+**Why broad middleware is necessary:**
+- **Session extension**: Each page request extends the session lifetime
+- **Consistent auth state**: Ensures authentication status is up-to-date across all pages
+- **Security headers**: Applies no-cache headers to prevent caching of authenticated content
+
+<Note>
+  If you disable rolling sessions (`rolling: false`), you can use a narrow middleware matcher since sessions don't need to be extended on every request.
+</Note>
+
+## Session Duration Examples
+
+### Short-lived sessions (1 hour)
+
+```typescript
+export const auth0 = new Auth0Client({
+  session: {
+    rolling: true,
+    absoluteDuration: 60 * 60, // 1 hour
+    inactivityDuration: 60 * 15 // 15 minutes
+  }
+});
+```
+
+**Use case:** High-security applications (banking, healthcare)
+
+### Standard sessions (7 days)
+
+```typescript
+export const auth0 = new Auth0Client({
+  session: {
+    rolling: true,
+    absoluteDuration: 60 * 60 * 24 * 7, // 7 days
+    inactivityDuration: 60 * 60 * 24 * 1 // 1 day
+  }
+});
+```
+
+**Use case:** Most web applications
+
+### Long-lived sessions (30 days)
+
+```typescript
+export const auth0 = new Auth0Client({
+  session: {
+    rolling: true,
+    absoluteDuration: 60 * 60 * 24 * 30, // 30 days
+    inactivityDuration: 60 * 60 * 24 * 7  // 7 days
+  }
+});
+```
+
+**Use case:** Consumer applications, content platforms
+
+### Remember me functionality
+
+```typescript
+// Short session (default)
+export const auth0 = new Auth0Client({
+  session: {
+    rolling: true,
+    absoluteDuration: 60 * 60 * 24 * 1, // 1 day
+    inactivityDuration: 60 * 60 * 2     // 2 hours
+  }
+});
+
+// Extended session (for "remember me")
+export const auth0Extended = new Auth0Client({
+  session: {
+    rolling: true,
+    absoluteDuration: 60 * 60 * 24 * 90, // 90 days
+    inactivityDuration: 60 * 60 * 24 * 30 // 30 days
+  }
+});
+```
+
+<Note>
+  Implement "remember me" by using different Auth0 client instances or by conditionally setting session options based on user preference.
+</Note>
+
+## Database Sessions
+
+By default, user sessions are stored in encrypted cookies. For applications with large sessions or server-side session revocation requirements, you can store sessions in a database.
+
+### Implementing Database Sessions
+
+<Steps>
+  <Step title="Create session store implementation">
+    Implement the `SessionStore` interface:
+
+    ```typescript lib/session-store.ts
+    import { AbstractSessionStore } from "@auth0/nextjs-auth0/server";
+    import type { SessionData } from "@auth0/nextjs-auth0";
+    import { db } from "./db";
+
+    export class DatabaseSessionStore extends AbstractSessionStore {
+      async get(id: string): Promise<SessionData | null | undefined> {
+        const session = await db.sessions.findUnique({
+          where: { id }
+        });
+        return session?.data || null;
+      }
+
+      async set(id: string, sessionData: SessionData): Promise<void> {
+        await db.sessions.upsert({
+          where: { id },
+          create: {
+            id,
+            data: sessionData,
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+          },
+          update: {
+            data: sessionData,
+            expiresAt: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000)
+          }
+        });
+      }
+
+      async delete(id: string): Promise<void> {
+        await db.sessions.delete({ where: { id } });
+      }
+
+      // Optional: For Back-Channel Logout support
+      async deleteByLogoutToken({ sid, sub }: { sid?: string; sub?: string }): Promise<void> {
+        if (sid) {
+          await db.sessions.deleteMany({ where: { sid } });
+        } else if (sub) {
+          await db.sessions.deleteMany({ where: { userId: sub } });
+        }
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="Configure Auth0 client">
+    Pass your session store to the Auth0 client:
+
+    ```typescript lib/auth0.ts
+    import { Auth0Client } from "@auth0/nextjs-auth0/server";
+    import { DatabaseSessionStore } from "./session-store";
+
+    export const auth0 = new Auth0Client({
+      sessionStore: new DatabaseSessionStore()
+    });
+    ```
+  </Step>
+</Steps>
+
+### Session Store Methods
+
+| Method | Parameters | Description |
+|--------|------------|-------------|
+| `get(id)` | `id: string` | Retrieve session by ID |
+| `set(id, sessionData)` | `id: string`, `sessionData: SessionData` | Store or update session |
+| `delete(id)` | `id: string` | Delete session by ID |
+| `deleteByLogoutToken({ sid, sub })` | `sid?: string`, `sub?: string` | Delete sessions for Back-Channel Logout |
+
+### Database Schema Example
+
+**Prisma:**
+
+```prisma schema.prisma
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  sid       String?  // For Back-Channel Logout
+  data      Json
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId])
+  @@index([sid])
+  @@index([expiresAt])
+}
+```
+
+**SQL:**
+
+```sql
+CREATE TABLE sessions (
+  id VARCHAR(255) PRIMARY KEY,
+  user_id VARCHAR(255) NOT NULL,
+  sid VARCHAR(255),
+  data JSON NOT NULL,
+  expires_at TIMESTAMP NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  INDEX idx_user_id (user_id),
+  INDEX idx_sid (sid),
+  INDEX idx_expires_at (expires_at)
+);
+```
+
+### Cleanup Expired Sessions
+
+Regularly clean up expired sessions to prevent database bloat:
+
+```typescript lib/cleanup-sessions.ts
+import { db } from "./db";
+
+export async function cleanupExpiredSessions() {
+  const deleted = await db.sessions.deleteMany({
+    where: {
+      expiresAt: {
+        lt: new Date()
+      }
+    }
+  });
+
+  console.log(`Cleaned up ${deleted.count} expired sessions`);
+}
+
+// Run as a cron job
+// 0 0 * * * - Daily at midnight
+```
+
+## Cookie-Based Sessions (Default)
+
+By default, sessions are stored in encrypted HTTP-only cookies.
+
+**Advantages:**
+- No database required
+- Fast (no database queries)
+- Stateless (scales horizontally)
+- Built-in encryption
+
+**Limitations:**
+- 4KB size limit (browser cookie limit)
+- Cannot revoke sessions server-side
+- All session data sent with every request
+
+<Note>
+  Cookie-based sessions are recommended for most applications. Use database sessions only when you need server-side session revocation or have large session data.
+</Note>
+
+## Best Practices
+
+<Note>
+  - **Use rolling sessions** for better user experience
+  - **Set appropriate timeouts** based on your security requirements
+  - **Use broad middleware matcher** to ensure rolling sessions work correctly
+  - **Clean up database sessions** regularly if using database storage
+  - **Monitor session size** to stay within cookie limits (4KB)
+  - **Test session expiration** to ensure users are logged out as expected
+</Note>
+
+## Troubleshooting
+
+### Sessions expiring too quickly
+
+If sessions expire faster than expected:
+- Check `inactivityDuration` is set correctly
+- Verify middleware is running on all requests
+- Ensure `rolling: true` is set
+- Check for clock skew between servers
+
+### Sessions not extending
+
+If sessions aren't being extended with activity:
+- Verify middleware matcher includes all routes
+- Check that `rolling: true` is set
+- Ensure requests are hitting the middleware
+- Look for errors in middleware execution
+
+### Cookie size limit exceeded
+
+If you see cookie errors:
+- Reduce session data size (remove unnecessary fields)
+- Use database sessions instead of cookie storage
+- Compress session data before storing
+- Store large data in database, keep only references in session
+
+### Database sessions not persisting
+
+If database sessions aren't working:
+- Verify database connection is working
+- Check session store implementation
+- Ensure database schema is correct
+- Look for errors in session store methods

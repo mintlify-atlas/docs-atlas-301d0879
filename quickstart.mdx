@@ -1,80 +1,394 @@
 ---
-title: "Quickstart"
-description: "Start building awesome documentation in minutes"
+title: Quickstart
+description: Get Auth0 authentication working in your Next.js app in under 5 minutes
 ---
 
-## Get started in three steps
+This guide will get you from zero to a working authentication flow in your Next.js application.
 
-Get your documentation site running locally and make your first customization.
+## Prerequisites
 
-### Step 1: Set up your local environment
+Before you begin, make sure you have:
 
-<AccordionGroup>
-  <Accordion icon="copy" title="Clone your docs locally">
-    During the onboarding process, you created a GitHub repository with your docs content if you didn't already have one. You can find a link to this repository in your [dashboard](https://dashboard.mintlify.com).
-    
-    To clone the repository locally so that you can make and preview changes to your docs, follow the [Cloning a repository](https://docs.github.com/en/repositories/creating-and-managing-repositories/cloning-a-repository) guide in the GitHub docs.
-  </Accordion>
-  <Accordion icon="rectangle-terminal" title="Start the preview server">
-    1. Install the Mintlify CLI: `npm i -g mint`
-    2. Navigate to your docs directory and run: `mint dev`
-    3. Open `http://localhost:3000` to see your docs live!
-    
-    <Tip>Your preview updates automatically as you edit files.</Tip>
-  </Accordion>
-</AccordionGroup>
+- Node.js 20 LTS or newer installed
+- A Next.js application (14.2.35 or newer)
+- An [Auth0 account](https://auth0.com/signup) (free tier works)
 
-### Step 2: Deploy your changes
+## Step 1: Install the SDK
 
-<AccordionGroup>
-  <Accordion icon="github" title="Install our GitHub app">
-    Install the Mintlify GitHub app from your [dashboard](https://dashboard.mintlify.com/settings/organization/github-app).
-    
-    Our GitHub app automatically deploys your changes to your docs site, so you don't need to manage deployments yourself.
-</Accordion>
-<Accordion icon="palette" title="Update your site name and colors">
-    For a first change, let's update the name and colors of your docs site.
+Install the Auth0 Next.js SDK using your preferred package manager:
 
-    1. Open `docs.json` in your editor.
-    2. Change the `"name"` field to your project name.
-    3. Update the `"colors"` to match your brand.
-    4. Save and see your changes instantly at `http://localhost:3000`.
+<CodeGroup>
 
-    <Tip>Try changing the primary color to see an immediate difference!</Tip>
-  </Accordion>
-</AccordionGroup>
+```bash npm
+npm install @auth0/nextjs-auth0
+```
 
-### Step 3: Go live
+```bash yarn
+yarn add @auth0/nextjs-auth0
+```
 
-<Accordion icon="rocket" title="Publish your docs">
-  1. Commit and push your changes.
-  2. Your docs will update and be live in moments!
-</Accordion>
+```bash pnpm
+pnpm add @auth0/nextjs-auth0
+```
 
-## Next steps
+</CodeGroup>
 
-Now that you have your docs running, explore these key features:
+## Step 2: Configure Environment Variables
+
+Create a `.env.local` file in your project root and add the following variables:
+
+```env .env.local
+AUTH0_DOMAIN=your-tenant.us.auth0.com
+AUTH0_CLIENT_ID=your_client_id
+AUTH0_CLIENT_SECRET=your_client_secret
+AUTH0_SECRET=use_openssl_rand_hex_32_to_generate_this
+APP_BASE_URL=http://localhost:3000
+```
+
+<Steps>
+  <Step title="Get Auth0 credentials">
+    1. Go to the [Auth0 Dashboard](https://manage.auth0.com)
+    2. Create a new application or select an existing one
+    3. Choose **Regular Web Application** as the application type
+    4. Copy the **Domain**, **Client ID**, and **Client Secret** from the application settings
+  </Step>
+
+  <Step title="Generate AUTH0_SECRET">
+    Generate a random 32-byte hex string for encrypting session cookies:
+
+    ```bash
+    openssl rand -hex 32
+    ```
+
+    Copy the output and use it as your `AUTH0_SECRET`.
+  </Step>
+
+  <Step title="Configure callback URLs">
+    In your Auth0 application settings, add the following URLs:
+
+    - **Allowed Callback URLs**: `http://localhost:3000/auth/callback`
+    - **Allowed Logout URLs**: `http://localhost:3000`
+  </Step>
+</Steps>
+
+<Info>
+For production deployments, update `APP_BASE_URL` to your production domain and register the production callback URLs in Auth0.
+</Info>
+
+## Step 3: Create the Auth0 Client
+
+Create a file `lib/auth0.ts` (or `lib/auth0.js`) in your project:
+
+```typescript lib/auth0.ts
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+export const auth0 = new Auth0Client();
+```
+
+This creates an Auth0 client instance that will be used throughout your application.
+
+## Step 4: Add Authentication Middleware
+
+Authentication requests are intercepted at the network boundary. Choose the setup for your Next.js version:
+
+<Tabs>
+  <Tab title="Next.js 15">
+    Create a `middleware.ts` file in the root of your project:
+
+    ```typescript middleware.ts
+    import type { NextRequest } from 'next/server';
+    import { auth0 } from './lib/auth0';
+
+    export async function middleware(request: NextRequest) {
+      return await auth0.middleware(request);
+    }
+
+    export const config = {
+      matcher: [
+        /*
+         * Match all request paths except for:
+         * - _next/static (static files)
+         * - _next/image (image optimization files)
+         * - favicon.ico, sitemap.xml, robots.txt (metadata files)
+         */
+        '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)',
+      ],
+    };
+    ```
+
+    <Note>
+    If you're using a `src/` directory, place the `middleware.ts` file inside the `src/` directory.
+    </Note>
+  </Tab>
+
+  <Tab title="Next.js 16">
+    Create a `proxy.ts` file in the root of your project:
+
+    ```typescript proxy.ts
+    import { auth0 } from './lib/auth0';
+
+    export async function proxy(request: Request) {
+      return await auth0.middleware(request);
+    }
+
+    export const config = {
+      matcher: [
+        '/((?!_next/static|_next/image|favicon.ico|sitemap.xml|robots.txt).*)',
+      ],
+    };
+    ```
+
+    <Warning>
+    Next.js 16 uses `proxy.ts` instead of `middleware.ts`. The proxy layer executes earlier in the routing pipeline and the Edge runtime applies stricter validation.
+    </Warning>
+  </Tab>
+</Tabs>
+
+<Info>
+The broad middleware matcher is essential for rolling sessions and security features. See the [Session Configuration](/guides/session-configuration) guide for more details.
+</Info>
+
+## Step 5: Add Login and Logout
+
+Update your home page to include login and logout functionality:
+
+<Tabs>
+  <Tab title="App Router">
+    ```typescript app/page.tsx
+    import { auth0 } from '@/lib/auth0';
+
+    export default async function Home() {
+      const session = await auth0.getSession();
+
+      if (!session) {
+        return (
+          <main className="flex min-h-screen flex-col items-center justify-center p-24">
+            <h1 className="text-4xl font-bold mb-8">Welcome to My App</h1>
+            <div className="flex gap-4">
+              <a
+                href="/auth/login?screen_hint=signup"
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Sign up
+              </a>
+              <a
+                href="/auth/login"
+                className="px-6 py-3 bg-gray-800 text-white rounded-lg hover:bg-gray-900"
+              >
+                Log in
+              </a>
+            </div>
+          </main>
+        );
+      }
+
+      return (
+        <main className="flex min-h-screen flex-col items-center justify-center p-24">
+          <h1 className="text-4xl font-bold mb-4">Welcome, {session.user.name}!</h1>
+          <p className="text-gray-600 mb-8">{session.user.email}</p>
+          <a
+            href="/auth/logout"
+            className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
+            Log out
+          </a>
+        </main>
+      );
+    }
+    ```
+  </Tab>
+
+  <Tab title="Pages Router">
+    ```typescript pages/index.tsx
+    import { auth0 } from '@/lib/auth0';
+    import { GetServerSideProps } from 'next';
+
+    export default function Home({ user }: { user: any }) {
+      if (!user) {
+        return (
+          <main className="flex min-h-screen flex-col items-center justify-center p-24">
+            <h1 className="text-4xl font-bold mb-8">Welcome to My App</h1>
+            <div className="flex gap-4">
+              <a
+                href="/auth/login?screen_hint=signup"
+                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+              >
+                Sign up
+              </a>
+              <a
+                href="/auth/login"
+                className="px-6 py-3 bg-gray-800 text-white rounded-lg hover:bg-gray-900"
+              >
+                Log in
+              </a>
+            </div>
+          </main>
+        );
+      }
+
+      return (
+        <main className="flex min-h-screen flex-col items-center justify-center p-24">
+          <h1 className="text-4xl font-bold mb-4">Welcome, {user.name}!</h1>
+          <p className="text-gray-600 mb-8">{user.email}</p>
+          <a
+            href="/auth/logout"
+            className="px-6 py-3 bg-red-600 text-white rounded-lg hover:bg-red-700"
+          >
+            Log out
+          </a>
+        </main>
+      );
+    }
+
+    export const getServerSideProps: GetServerSideProps = async ({ req, res }) => {
+      const session = await auth0.getSession(req, res);
+      
+      return {
+        props: {
+          user: session?.user || null,
+        },
+      };
+    };
+    ```
+  </Tab>
+</Tabs>
+
+<Warning>
+Always use `<a>` tags for auth routes instead of Next.js `<Link>` components to ensure proper server-side navigation.
+</Warning>
+
+## Step 6: Test Your Application
+
+<Steps>
+  <Step title="Start the development server">
+    ```bash
+    npm run dev
+    ```
+
+    Your app should now be running at `http://localhost:3000`.
+  </Step>
+
+  <Step title="Test the login flow">
+    1. Click **Log in** or **Sign up**
+    2. You'll be redirected to Auth0's login page
+    3. Enter your credentials or sign up
+    4. You'll be redirected back to your app, now logged in
+  </Step>
+
+  <Step title="Test the logout flow">
+    Click **Log out** to sign out. You'll be logged out of Auth0 and redirected back to your app.
+  </Step>
+</Steps>
+
+## Access User Information
+
+Now that authentication is working, you can access user information throughout your app:
+
+### In Server Components (App Router)
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export default async function Profile() {
+  const session = await auth0.getSession();
+  
+  if (!session) {
+    return <div>Please log in</div>;
+  }
+
+  return (
+    <div>
+      <h1>{session.user.name}</h1>
+      <p>{session.user.email}</p>
+      <img src={session.user.picture} alt="Profile" />
+    </div>
+  );
+}
+```
+
+### In Client Components
+
+First, wrap your app with the `Auth0Provider`:
+
+```typescript app/layout.tsx
+import { Auth0Provider } from '@auth0/nextjs-auth0/client';
+
+export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>
+        <Auth0Provider>
+          {children}
+        </Auth0Provider>
+      </body>
+    </html>
+  );
+}
+```
+
+Then use the `useUser` hook in client components:
+
+```typescript
+'use client';
+
+import { useUser } from '@auth0/nextjs-auth0/client';
+
+export default function Profile() {
+  const { user, error, isLoading } = useUser();
+
+  if (isLoading) return <div>Loading...</div>;
+  if (error) return <div>Error: {error.message}</div>;
+  if (!user) return <a href="/auth/login">Log in</a>;
+
+  return (
+    <div>
+      <h1>{user.name}</h1>
+      <p>{user.email}</p>
+      <img src={user.picture} alt="Profile" />
+    </div>
+  );
+}
+```
+
+## Next Steps
+
+You now have a fully working authentication system! Here are some next steps:
 
 <CardGroup cols={2}>
-
-<Card title="Write Content" icon="pen-to-square" href="/essentials/markdown">
-  Learn MDX syntax and start writing your documentation.
-</Card>
-
-<Card title="Customize style" icon="palette" href="/essentials/settings">
-  Make your docs match your brand perfectly.
-</Card>
-
-<Card title="Add code examples" icon="square-code" href="/essentials/code">
-  Include syntax-highlighted code blocks.
-</Card>
-
-<Card title="API documentation" icon="code" href="/api-reference/introduction">
-  Auto-generate API docs from OpenAPI specs.
-</Card>
-
+  <Card title="Protect Pages" icon="lock" href="/guides/protecting-pages">
+    Learn how to protect entire pages and routes
+  </Card>
+  <Card title="Get Access Tokens" icon="key" href="/server/get-access-token">
+    Call external APIs with access tokens
+  </Card>
+  <Card title="Customize Sessions" icon="gear" href="/guides/session-configuration">
+    Configure session duration and storage
+  </Card>
+  <Card title="Advanced Features" icon="sparkles" href="/advanced/dpop">
+    Explore DPoP, MFA, and MRRT
+  </Card>
 </CardGroup>
 
-<Note>
-  **Need help?** See our [full documentation](https://mintlify.com/docs) or join our [community](https://mintlify.com/community).
-</Note>
+## Troubleshooting
+
+<AccordionGroup>
+  <Accordion title="Invalid state error">
+    This usually happens when cookies are blocked or the `AUTH0_SECRET` has changed. Make sure:
+    - Cookies are enabled in your browser
+    - The `AUTH0_SECRET` matches across restarts
+    - You're not mixing HTTP and HTTPS during development
+  </Accordion>
+
+  <Accordion title="Redirect URI mismatch">
+    Ensure your callback URL is registered in Auth0:
+    - Go to your Auth0 application settings
+    - Add `http://localhost:3000/auth/callback` to Allowed Callback URLs
+    - For production, add your production callback URL
+  </Accordion>
+
+  <Accordion title="Session not persisting">
+    Check that your middleware is properly configured and the matcher pattern is correct. The middleware must run on every request for rolling sessions to work.
+  </Accordion>
+</AccordionGroup>
+
+Need more help? Check the [Troubleshooting](/resources/troubleshooting) guide.

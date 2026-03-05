@@ -1,0 +1,203 @@
+---
+title: 'SessionData'
+description: 'Represents the authenticated user session data stored and managed by the SDK'
+---
+
+## Overview
+
+The `SessionData` interface represents the complete session state for an authenticated user. This includes user profile information, access tokens, and internal session management data.
+
+## Type Definition
+
+```typescript
+export interface SessionData {
+  user: User;
+  tokenSet: TokenSet;
+  accessTokens?: AccessTokenSet[];
+  internal: {
+    // the session ID from the authorization server
+    sid: string;
+    // the time at which the session was created in seconds since epoch
+    createdAt: number;
+  };
+  connectionTokenSets?: ConnectionTokenSet[];
+  [key: string]: unknown;
+}
+```
+
+## Properties
+
+<ResponseField name="user" type="User" required>
+  The authenticated user's profile information. See [User](/api/types/user) for details.
+</ResponseField>
+
+<ResponseField name="tokenSet" type="TokenSet" required>
+  The primary token set containing access token, ID token, and refresh token. See [TokenSet](/api/types/token-set) for details.
+</ResponseField>
+
+<ResponseField name="accessTokens" type="AccessTokenSet[]">
+  Array of additional access tokens for different audiences when using Multi-Resource Refresh Tokens (MRRT). Each token is scoped to a specific API audience.
+</ResponseField>
+
+<ResponseField name="internal" type="object" required>
+  Internal session management data maintained by the SDK.
+  
+  <Expandable title="properties">
+    <ResponseField name="sid" type="string" required>
+      The session ID from the authorization server, used for session tracking and backchannel logout.
+    </ResponseField>
+    
+    <ResponseField name="createdAt" type="number" required>
+      Unix timestamp (in seconds) when the session was created.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+<ResponseField name="connectionTokenSets" type="ConnectionTokenSet[]">
+  Array of token sets for connected accounts (third-party authentication providers linked to the user's profile).
+</ResponseField>
+
+<ResponseField name="[key: string]" type="unknown">
+  Additional custom properties can be added to the session using the `beforeSessionSaved` hook.
+</ResponseField>
+
+## Related Types
+
+### AccessTokenSet
+
+```typescript
+export interface AccessTokenSet {
+  accessToken: string;
+  scope?: string;
+  requestedScope?: string;
+  audience: string;
+  expiresAt: number; // the time at which the access token expires in seconds since epoch
+  token_type?: string; // the type of the access token (e.g., "Bearer", "DPoP")
+}
+```
+
+Represents an access token for a specific audience in Multi-Resource Refresh Token scenarios.
+
+## Usage Examples
+
+### Get Session in Server Components (App Router)
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export default async function ProfilePage() {
+  const session = await auth0.getSession();
+  
+  if (!session) {
+    return <div>Not authenticated</div>;
+  }
+  
+  return (
+    <div>
+      <h1>Welcome, {session.user.name}</h1>
+      <p>Email: {session.user.email}</p>
+      <p>Session ID: {session.internal.sid}</p>
+    </div>
+  );
+}
+```
+
+### Get Session in API Routes (Pages Router)
+
+```typescript
+import type { NextApiRequest, NextApiResponse } from 'next';
+import { auth0 } from '@/lib/auth0';
+
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
+  const session = await auth0.getSession(req);
+  
+  if (!session) {
+    return res.status(401).json({ error: 'Not authenticated' });
+  }
+  
+  res.json({
+    user: session.user,
+    sessionCreated: new Date(session.internal.createdAt * 1000).toISOString()
+  });
+}
+```
+
+### Update Session
+
+```typescript
+import { auth0 } from '@/lib/auth0';
+
+export async function POST(request: Request) {
+  const session = await auth0.getSession();
+  
+  if (!session) {
+    return Response.json({ error: 'Not authenticated' }, { status: 401 });
+  }
+  
+  // Add custom data to session
+  await auth0.updateSession({
+    ...session,
+    customData: { preference: 'dark-mode' }
+  });
+  
+  return Response.json({ success: true });
+}
+```
+
+### Modify Session with beforeSessionSaved Hook
+
+```typescript
+import { Auth0Client } from '@auth0/nextjs-auth0/server';
+
+export const auth0 = new Auth0Client({
+  beforeSessionSaved: async (session, idToken) => {
+    // Add custom claims or filter sensitive data
+    return {
+      ...session,
+      user: {
+        ...session.user,
+        // Add custom property
+        displayName: session.user.name || session.user.email
+      }
+    };
+  }
+});
+```
+
+## Session Storage
+
+By default, sessions are stored in encrypted cookies (stateless). For large sessions or server-side revocation, use a custom session store:
+
+```typescript
+import { Auth0Client, SessionDataStore } from '@auth0/nextjs-auth0/server';
+
+const sessionStore: SessionDataStore = {
+  async get(id: string) {
+    // Retrieve session from your database
+    return await db.sessions.findOne({ id });
+  },
+  
+  async set(id: string, session: SessionData) {
+    // Store session in your database
+    await db.sessions.upsert({ id, data: session });
+  },
+  
+  async delete(id: string) {
+    // Delete session from your database
+    await db.sessions.delete({ id });
+  }
+};
+
+export const auth0 = new Auth0Client({
+  sessionStore
+});
+```
+
+## See Also
+
+- [User](/api/types/user) - User profile interface
+- [TokenSet](/api/types/token-set) - Token set interface
+- [Configuration](/api/types/configuration) - SDK configuration options
