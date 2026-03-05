@@ -51,7 +51,8 @@
               "client/use-user",
               "client/get-access-token",
               "client/auth0-provider",
-              "client/with-page-auth-required"
+              "client/with-page-auth-required",
+              "client/mfa"
             ]
           },
           {
@@ -63,7 +64,8 @@
               "server/get-access-token",
               "server/update-session",
               "server/session-stores",
-              "server/with-page-auth-required"
+              "server/with-page-auth-required",
+              "server/utilities"
             ]
           },
           {
@@ -119,7 +121,8 @@
               "api/client/use-user",
               "api/client/get-access-token",
               "api/client/auth0-provider",
-              "api/client/with-page-auth-required"
+              "api/client/with-page-auth-required",
+              "api/client/mfa"
             ]
           },
           {

@@ -1,0 +1,154 @@
+---
+title: Server Utilities
+description: Utility functions exported from @auth0/nextjs-auth0/server
+---
+
+The server module exports utility functions for working with ID token claims and other authentication-related operations.
+
+## filterDefaultIdTokenClaims
+
+Filters out default OIDC claims from an ID token, leaving only custom claims.
+
+```typescript
+function filterDefaultIdTokenClaims(claims: Record<string, any>): Record<string, any>
+```
+
+<ParamField path="claims" type="Record<string, any>" required>
+  The ID token claims object to filter
+</ParamField>
+
+<ResponseField name="filteredClaims" type="Record<string, any>">
+  Object containing only custom claims (default OIDC claims removed)
+</ResponseField>
+
+### Example
+
+```typescript
+import { filterDefaultIdTokenClaims } from '@auth0/nextjs-auth0/server';
+
+const idTokenClaims = {
+  sub: 'auth0|123',
+  name: 'John Doe',
+  email: 'john@example.com',
+  iss: 'https://tenant.auth0.com/',
+  aud: 'client_id',
+  exp: 1234567890,
+  iat: 1234567800,
+  // Custom claims
+  'https://my-app.com/roles': ['admin', 'user'],
+  'https://my-app.com/plan': 'premium'
+};
+
+const customClaims = filterDefaultIdTokenClaims(idTokenClaims);
+// Returns:
+// {
+//   'https://my-app.com/roles': ['admin', 'user'],
+//   'https://my-app.com/plan': 'premium'
+// }
+```
+
+### Use Case
+
+This utility is helpful when you want to extract only the custom claims from an ID token, such as:
+- Application-specific user metadata
+- Custom authorization data (roles, permissions)
+- Business logic data
+
+<Note>
+According to OIDC best practices, custom claims should use namespaced URIs (e.g., `https://my-app.com/claim-name`) to avoid conflicts with standard claims.
+</Note>
+
+---
+
+## DEFAULT_ID_TOKEN_CLAIMS
+
+An array constant containing the standard OIDC ID token claim names that are filtered by `filterDefaultIdTokenClaims`.
+
+```typescript
+const DEFAULT_ID_TOKEN_CLAIMS: string[]
+```
+
+### Default Claims List
+
+The following claims are considered default OIDC claims and will be filtered out:
+
+| Claim | Description |
+|-------|-------------|
+| `iss` | Issuer identifier |
+| `sub` | Subject identifier (user ID) |
+| `aud` | Audience (client ID) |
+| `exp` | Expiration time |
+| `iat` | Issued at time |
+| `auth_time` | Authentication time |
+| `nonce` | Nonce value |
+| `acr` | Authentication Context Class Reference |
+| `amr` | Authentication Methods References |
+| `azp` | Authorized party |
+| `at_hash` | Access token hash |
+| `c_hash` | Code hash |
+| `s_hash` | State hash |
+| `sid` | Session ID |
+
+### Example
+
+```typescript
+import { DEFAULT_ID_TOKEN_CLAIMS } from '@auth0/nextjs-auth0/server';
+
+console.log(DEFAULT_ID_TOKEN_CLAIMS);
+// [
+//   'iss', 'sub', 'aud', 'exp', 'iat',
+//   'auth_time', 'nonce', 'acr', 'amr',
+//   'azp', 'at_hash', 'c_hash', 's_hash', 'sid'
+// ]
+
+// Use with custom filtering logic
+function getCustomClaims(claims: Record<string, any>) {
+  const customClaims: Record<string, any> = {};
+  for (const [key, value] of Object.entries(claims)) {
+    if (!DEFAULT_ID_TOKEN_CLAIMS.includes(key)) {
+      customClaims[key] = value;
+    }
+  }
+  return customClaims;
+}
+```
+
+## Usage with beforeSessionSaved Hook
+
+A common use case is to extract custom claims when saving the session:
+
+```typescript
+import { Auth0Client, filterDefaultIdTokenClaims } from '@auth0/nextjs-auth0/server';
+
+export const auth0 = new Auth0Client({
+  beforeSessionSaved: (session, request) => {
+    // Extract custom claims from ID token
+    const customClaims = filterDefaultIdTokenClaims(session.idToken);
+    
+    // Add custom claims to session user object
+    return {
+      ...session,
+      user: {
+        ...session.user,
+        customClaims
+      }
+    };
+  }
+});
+```
+
+Then access custom claims from your session:
+
+```typescript
+const session = await auth0.getSession();
+if (session?.user.customClaims) {
+  const userRoles = session.user.customClaims['https://my-app.com/roles'];
+  const userPlan = session.user.customClaims['https://my-app.com/plan'];
+}
+```
+
+## See Also
+
+- [Session Configuration](/guides/session-configuration) - Configure session behavior
+- [beforeSessionSaved Hook](/guides/customizing-auth-handlers) - Customize session data
+- [User Type](/api/types/user) - User object structure

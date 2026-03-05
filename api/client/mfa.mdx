@@ -1,0 +1,56 @@
+---
+title: mfa
+description: Client-side MFA API reference
+---
+
+For complete documentation of the MFA client API, see the [Client MFA](/client/mfa) page.
+
+This is a singleton object exported from `@auth0/nextjs-auth0/client` that provides methods for handling multi-factor authentication flows from the browser.
+
+## Type Definition
+
+```typescript
+interface MfaClient {
+  getAuthenticators(options: { mfaToken: string }): Promise<Authenticator[]>;
+  challenge(options: {
+    mfaToken: string;
+    challengeType: string;
+    authenticatorId?: string;
+  }): Promise<ChallengeResponse>;
+  verify(options: VerifyMfaOptions): Promise<MfaVerifyResponse>;
+  enroll(options: EnrollOptions): Promise<EnrollmentResponse>;
+}
+```
+
+## Quick Reference
+
+| Method | Purpose |
+|--------|---------|
+| `getAuthenticators` | List enrolled MFA authenticators |
+| `challenge` | Initiate MFA challenge (send SMS/email code) |
+| `verify` | Verify MFA code and complete authentication |
+| `enroll` | Enroll new MFA authenticator |
+
+## Example Usage
+
+```typescript
+'use client';
+import { mfa } from '@auth0/nextjs-auth0/client';
+
+// In an MFA verification component
+async function handleMfaVerification(mfaToken: string, code: string) {
+  try {
+    const tokens = await mfa.verify({ mfaToken, otp: code });
+    // Authentication successful
+    window.location.href = '/dashboard';
+  } catch (error) {
+    if (error.code === 'mfa_token_expired') {
+      // Token expired, restart authentication
+    } else if (error.code === 'invalid_grant') {
+      // Wrong code entered
+    }
+  }
+}
+```
+
+See the [Client MFA](/client/mfa) page for detailed documentation and examples.

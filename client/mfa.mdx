@@ -1,0 +1,389 @@
+---
+title: mfa (Client)
+description: Client-side MFA API for multi-factor authentication flows
+---
+
+The `mfa` client export provides a singleton API for handling multi-factor authentication operations from the client side. All methods are thin wrappers around fetch calls to server-side MFA routes where the actual business logic executes.
+
+## Import
+
+```typescript
+import { mfa } from '@auth0/nextjs-auth0/client';
+```
+
+## Methods
+
+### getAuthenticators
+
+List enrolled MFA authenticators for the current MFA session.
+
+```typescript
+async getAuthenticators(options: { mfaToken: string }): Promise<Authenticator[]>
+```
+
+<ParamField path="options.mfaToken" type="string" required>
+  Encrypted MFA token received from `MfaRequiredError`
+</ParamField>
+
+<ResponseField name="authenticators" type="Authenticator[]">
+  Array of available authenticators
+
+  <Expandable title="Authenticator properties">
+    <ResponseField name="id" type="string">
+      Unique authenticator ID
+    </ResponseField>
+    <ResponseField name="authenticatorType" type="string">
+      Type of authenticator (e.g., "otp", "oob", "email")
+    </ResponseField>
+    <ResponseField name="name" type="string">
+      User-friendly name
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```typescript
+'use client';
+import { mfa } from '@auth0/nextjs-auth0/client';
+import { useState, useEffect } from 'react';
+
+export function AuthenticatorList({ mfaToken }) {
+  const [authenticators, setAuthenticators] = useState([]);
+
+  useEffect(() => {
+    mfa.getAuthenticators({ mfaToken })
+      .then(setAuthenticators)
+      .catch(console.error);
+  }, [mfaToken]);
+
+  return (
+    <ul>
+      {authenticators.map(auth => (
+        <li key={auth.id}>{auth.authenticatorType}</li>
+      ))}
+    </ul>
+  );
+}
+```
+
+**Throws:**
+- `MfaTokenExpiredError` - Token TTL exceeded
+- `MfaTokenInvalidError` - Token tampered or malformed
+- `MfaGetAuthenticatorsError` - Auth0 API error
+
+---
+
+### challenge
+
+Initiate an MFA challenge (e.g., send SMS code).
+
+```typescript
+async challenge(options: {
+  mfaToken: string;
+  challengeType: string;
+  authenticatorId?: string;
+}): Promise<ChallengeResponse>
+```
+
+<ParamField path="options.mfaToken" type="string" required>
+  Encrypted MFA token
+</ParamField>
+
+<ParamField path="options.challengeType" type="string" required>
+  Type of challenge (e.g., "oob" for SMS/email, "otp" for authenticator apps)
+</ParamField>
+
+<ParamField path="options.authenticatorId" type="string">
+  Specific authenticator to use (required for some challenge types)
+</ParamField>
+
+<ResponseField name="response" type="ChallengeResponse">
+  Challenge response object
+
+  <Expandable title="ChallengeResponse properties">
+    <ResponseField name="oobCode" type="string">
+      Out-of-band code (for SMS/email challenges)
+    </ResponseField>
+    <ResponseField name="bindingMethod" type="string">
+      Binding method for the challenge
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```typescript
+'use client';
+import { mfa } from '@auth0/nextjs-auth0/client';
+
+async function sendSmsCode(mfaToken, authenticatorId) {
+  const challenge = await mfa.challenge({
+    mfaToken,
+    challengeType: 'oob',
+    authenticatorId
+  });
+  // SMS sent, now collect binding code from user
+  return challenge.oobCode;
+}
+```
+
+**Throws:**
+- `MfaTokenExpiredError` - Token TTL exceeded
+- `MfaTokenInvalidError` - Token tampered or malformed
+- `MfaChallengeError` - Auth0 API error
+
+---
+
+### verify
+
+Verify MFA code and complete authentication.
+
+```typescript
+async verify(options: VerifyMfaOptions): Promise<MfaVerifyResponse>
+```
+
+The `VerifyMfaOptions` is a union type that accepts different verification methods:
+
+<Tabs>
+  <Tab title="OTP (TOTP)">
+    ```typescript
+    {
+      mfaToken: string;
+      otp: string;
+    }
+    ```
+    
+    For authenticator app codes (6-digit TOTP codes).
+  </Tab>
+  
+  <Tab title="OOB (SMS/Email)">
+    ```typescript
+    {
+      mfaToken: string;
+      oobCode: string;
+      bindingCode: string;
+    }
+    ```
+    
+    For SMS or email verification codes.
+  </Tab>
+  
+  <Tab title="Recovery Code">
+    ```typescript
+    {
+      mfaToken: string;
+      recoveryCode: string;
+    }
+    ```
+    
+    For recovery/backup codes.
+  </Tab>
+</Tabs>
+
+<ResponseField name="response" type="MfaVerifyResponse">
+  Token response after successful verification
+
+  <Expandable title="MfaVerifyResponse properties">
+    <ResponseField name="access_token" type="string">
+      Access token for authenticated user
+    </ResponseField>
+    <ResponseField name="refresh_token" type="string">
+      Refresh token (if configured)
+    </ResponseField>
+    <ResponseField name="id_token" type="string">
+      ID token with user claims
+    </ResponseField>
+    <ResponseField name="expires_in" type="number">
+      Token expiration time in seconds
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```typescript
+'use client';
+import { mfa } from '@auth0/nextjs-auth0/client';
+import { useState } from 'react';
+
+export function MfaVerification({ mfaToken }) {
+  const [otp, setOtp] = useState('');
+  const [error, setError] = useState(null);
+
+  async function handleVerify() {
+    try {
+      await mfa.verify({ mfaToken, otp });
+      window.location.href = '/dashboard'; // Redirect after success
+    } catch (err) {
+      setError(err.message);
+    }
+  }
+
+  return (
+    <form onSubmit={e => { e.preventDefault(); handleVerify(); }}>
+      <input 
+        value={otp} 
+        onChange={e => setOtp(e.target.value)}
+        placeholder="Enter 6-digit code"
+      />
+      <button type="submit">Verify</button>
+      {error && <p>{error}</p>}
+    </form>
+  );
+}
+```
+
+**Throws:**
+- `MfaTokenExpiredError` - Token TTL exceeded
+- `MfaTokenInvalidError` - Token tampered or malformed
+- `MfaRequiredError` - Additional MFA factor required (chained MFA)
+- `MfaVerifyError` - Auth0 API error (wrong code, rate limit, etc.)
+
+<Note>
+If Auth0 returns `mfa_required`, this indicates chained MFA where multiple factors are required sequentially. The error will contain a new `mfa_token` for the next factor.
+</Note>
+
+---
+
+### enroll
+
+Enroll a new MFA authenticator.
+
+```typescript
+async enroll(options: EnrollOptions): Promise<EnrollmentResponse>
+```
+
+<ParamField path="options.mfaToken" type="string" required>
+  Encrypted MFA token
+</ParamField>
+
+<ParamField path="options.authenticatorTypes" type="string[]" required>
+  Array of authenticator types to enroll (e.g., ["otp"], ["oob"], ["email"])
+</ParamField>
+
+<ParamField path="options.phoneNumber" type="string">
+  Phone number for SMS enrollment (required for oob type)
+</ParamField>
+
+<ParamField path="options.email" type="string">
+  Email address for email enrollment (required for email type)
+</ParamField>
+
+<ResponseField name="response" type="EnrollmentResponse">
+  Enrollment response with authenticator details
+
+  <Expandable title="EnrollmentResponse properties">
+    <ResponseField name="authenticatorId" type="string">
+      ID of the newly enrolled authenticator
+    </ResponseField>
+    <ResponseField name="secret" type="string">
+      Secret key (for OTP authenticators)
+    </ResponseField>
+    <ResponseField name="barcodeUri" type="string">
+      QR code URI for OTP enrollment
+    </ResponseField>
+    <ResponseField name="recoveryCodes" type="string[]">
+      Recovery codes (if enabled)
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+**Example:**
+
+```typescript
+'use client';
+import { mfa } from '@auth0/nextjs-auth0/client';
+import { useState } from 'react';
+import QRCode from 'qrcode.react';
+
+export function EnrollOtp({ mfaToken }) {
+  const [enrollment, setEnrollment] = useState(null);
+
+  async function handleEnroll() {
+    const result = await mfa.enroll({
+      mfaToken,
+      authenticatorTypes: ['otp']
+    });
+    setEnrollment(result);
+  }
+
+  return enrollment ? (
+    <div>
+      <QRCode value={enrollment.barcodeUri} />
+      <p>Scan this QR code with your authenticator app</p>
+      {enrollment.recoveryCodes && (
+        <div>
+          <h3>Recovery Codes</h3>
+          <ul>
+            {enrollment.recoveryCodes.map(code => (
+              <li key={code}>{code}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  ) : (
+    <button onClick={handleEnroll}>Enroll Authenticator</button>
+  );
+}
+```
+
+**Throws:**
+- `MfaTokenExpiredError` - Token TTL exceeded
+- `MfaTokenInvalidError` - Token tampered or malformed
+- `MfaEnrollmentError` - Auth0 API error
+
+## Usage Pattern
+
+The typical MFA flow using the client API:
+
+<Steps>
+  <Step title="Catch MfaRequiredError">
+    When authentication fails with MFA required, extract the `mfaToken` from the error.
+    
+    ```typescript
+    try {
+      await someAuthOperation();
+    } catch (error) {
+      if (error instanceof MfaRequiredError) {
+        // Store mfaToken for MFA flow
+        setMfaToken(error.mfa_token);
+      }
+    }
+    ```
+  </Step>
+
+  <Step title="List available authenticators">
+    ```typescript
+    const authenticators = await mfa.getAuthenticators({ mfaToken });
+    ```
+  </Step>
+
+  <Step title="Challenge (if needed)">
+    For SMS/email, initiate a challenge:
+    
+    ```typescript
+    await mfa.challenge({
+      mfaToken,
+      challengeType: 'oob',
+      authenticatorId: authenticators[0].id
+    });
+    ```
+  </Step>
+
+  <Step title="Verify">
+    Collect the code from the user and verify:
+    
+    ```typescript
+    const tokens = await mfa.verify({ mfaToken, otp: userCode });
+    // Authentication complete, redirect to protected page
+    ```
+  </Step>
+</Steps>
+
+## See Also
+
+- [MFA Guide](/advanced/mfa) - Complete MFA implementation guide
+- [MFA Errors](/api/errors/mfa-errors) - MFA error reference
+- [Server MFA Handling](/server/get-access-token) - Server-side MFA handling
